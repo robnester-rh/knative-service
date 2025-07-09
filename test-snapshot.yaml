@@ -1,0 +1,12 @@
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: Snapshot
+metadata:
+  name: test-snapshot
+  namespace: default
+spec:
+  application: application-sample
+  displayName: test-snapshot
+  displayDescription: my first snapshot
+  components:
+    - name: test-component
+      containerImage: "quay.io/redhat-user-workloads/rhtap-contract-tenant/golden-container/golden-container@sha256:185f6c39e5544479863024565bb7e63c6f2f0547c3ab4ddf99ac9b5755075cc9"
