@@ -14,6 +14,7 @@ help: ## Show this help message
 	@echo 'Targets:'
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / { printf "  %-15s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
+# Note: `kn quickstart kind` is an alternative way to do this (and that's what I've been using actually)
 .PHONY: setup-knative
 setup-knative: ## Install Knative Serving and Eventing components using the operator
 	@echo "Installing Knative Operator..."
@@ -45,7 +46,7 @@ deploy: check-knative ## Deploy the service using kustomize and ko
 	@echo "Deploying conforma-verifier-listener..."
 	@echo "Using KO_DOCKER_REPO: $(KO_DOCKER_REPO)"
 	@echo "Using namespace: $(NAMESPACE)"
-	kustomize build config/ | KO_DOCKER_REPO=$(KO_DOCKER_REPO) ko apply -f -
+	kustomize build config/dev/ | KO_DOCKER_REPO=$(KO_DOCKER_REPO) ko apply -f -
 	@echo "Deployment complete!"
 
 .PHONY: deploy-with-knative-setup
@@ -54,7 +55,7 @@ deploy-with-knative-setup: setup-knative deploy ## Setup Knative and deploy the 
 .PHONY: undeploy
 undeploy: ## Remove the service deployment
 	@echo "Removing conforma-verifier-listener..."
-	kustomize build config/ | ko delete -f -
+	kustomize build config/dev/ | ko delete -f -
 	@echo "Undeployment complete!"
 
 .PHONY: logs
