@@ -45,7 +45,7 @@ deploy: check-knative ## Deploy the service using kustomize and ko
 	@echo "Deploying conforma-verifier-listener..."
 	@echo "Using KO_DOCKER_REPO: $(KO_DOCKER_REPO)"
 	@echo "Using namespace: $(NAMESPACE)"
-	KO_DOCKER_REPO=$(KO_DOCKER_REPO) ko apply -k config/
+	kustomize build config/ | KO_DOCKER_REPO=$(KO_DOCKER_REPO) ko apply -f -
 	@echo "Deployment complete!"
 
 .PHONY: deploy-with-knative-setup
@@ -54,7 +54,7 @@ deploy-with-knative-setup: setup-knative deploy ## Setup Knative and deploy the 
 .PHONY: undeploy
 undeploy: ## Remove the service deployment
 	@echo "Removing conforma-verifier-listener..."
-	ko delete -k config/
+	kustomize build config/ | ko delete -f -
 	@echo "Undeployment complete!"
 
 .PHONY: logs
