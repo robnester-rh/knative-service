@@ -14,21 +14,12 @@ help: ## Show this help message
 	@echo 'Targets:'
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / { printf "  %-15s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
-# Note: `kn quickstart kind` is an alternative way to do this (and that's what I've been using actually)
 .PHONY: setup-knative
-setup-knative: ## Install Knative Serving and Eventing components using the operator
-	@echo "Installing Knative Operator..."
-	kubectl apply -f https://github.com/knative/operator/releases/download/knative-v1.18.2/operator.yaml
-	@echo "Waiting for Knative Operator to be ready..."
-	kubectl wait --for=condition=ready pod -l app=knative-operator -n knative-operator --timeout=300s
-	@echo "Installing Knative Serving..."
-	kubectl apply -f config/knative-serving.yaml
-	@echo "Installing Knative Eventing..."
-	kubectl apply -f config/knative-eventing.yaml
-	@echo "Waiting for Knative components to be ready..."
-	kubectl wait --for=condition=ready pod -l app=controller -n knative-serving --timeout=600s
-	kubectl wait --for=condition=ready pod -l app=controller -n knative-eventing --timeout=600s
-	@echo "Knative setup complete!"
+setup-knative: ## Install and configure a kind cluster wit knative installed
+	@# Nuke the existing cluster if it exists
+	kind delete cluster -n knative
+	@# Create a new one
+	kn quickstart kind
 
 .PHONY: check-knative
 check-knative: ## Check if Knative is properly installed
@@ -47,6 +38,9 @@ deploy: check-knative ## Deploy the service using kustomize and ko
 	@echo "Using KO_DOCKER_REPO: $(KO_DOCKER_REPO)"
 	@echo "Using namespace: $(NAMESPACE)"
 	kustomize build config/dev/ | KO_DOCKER_REPO=$(KO_DOCKER_REPO) ko apply -f -
+	@echo "Waiting for pods to be ready..."
+	hack/wait-for-ready-pod.sh eventing.knative.dev/sourceName=snapshot-events $(NAMESPACE)
+	hack/wait-for-ready-pod.sh serving.knative.dev/configuration=conforma-verifier-listener $(NAMESPACE)
 	@echo "Deployment complete!"
 
 .PHONY: deploy-with-knative-setup
@@ -55,7 +49,7 @@ deploy-with-knative-setup: setup-knative deploy ## Setup Knative and deploy the 
 .PHONY: undeploy
 undeploy: ## Remove the service deployment
 	@echo "Removing conforma-verifier-listener..."
-	kustomize build config/dev/ | ko delete -f -
+	kustomize build config/dev/ | ko delete --ignore-not-found -f -
 	@echo "Undeployment complete!"
 
 .PHONY: logs
@@ -76,14 +70,6 @@ status: ## Show deployment status
 	@echo ""
 	@echo "Triggers:"
 	kubectl get trigger -n $(NAMESPACE)
-
-.PHONY: clean
-clean: ## Clean up all resources
-	@echo "Cleaning up all resources..."
-	ko delete -k config/
-	kubectl delete namespace knative-serving --ignore-not-found=true
-	kubectl delete namespace knative-eventing --ignore-not-found=true
-	@echo "Cleanup complete!"
 
 .PHONY: test
 test: ## Run tests

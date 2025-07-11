@@ -99,14 +99,25 @@ spec:
 
 ## Development
 
+### Quickstart
+
+* Make sure you have recent versions of `kn`, `kn-quickstart`, `ko`, `kind`, and `tkn` installed.
+* Run `make setup-knative`
+* Do `export KO_DOCKER_REPO=quay.io/yourquayuser`
+* Run `make build`
+* Go to <https://quay.io/> and configure the `quay.io/yourquayuser/launch-taskrun-*`
+  repo that was just created to be public instead of private.
+* Run `make deploy`
+* Run `hack/demo.sh`
+
 ### Building
 ```bash
-go build ./cmd/launch-taskrun/
+make build
 ```
 
 ### Testing
 ```bash
-go test ./cmd/launch-taskrun/ -v
+make test
 ```
 
 ### Running Locally
