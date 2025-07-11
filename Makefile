@@ -49,7 +49,7 @@ deploy-with-knative-setup: setup-knative deploy ## Setup Knative and deploy the 
 .PHONY: undeploy
 undeploy: ## Remove the service deployment
 	@echo "Removing conforma-verifier-listener..."
-	kustomize build config/dev/ | ko delete -f -
+	kustomize build config/dev/ | ko delete --ignore-not-found -f -
 	@echo "Undeployment complete!"
 
 .PHONY: logs
@@ -70,14 +70,6 @@ status: ## Show deployment status
 	@echo ""
 	@echo "Triggers:"
 	kubectl get trigger -n $(NAMESPACE)
-
-.PHONY: clean
-clean: ## Clean up all resources
-	@echo "Cleaning up all resources..."
-	ko delete -k config/
-	kubectl delete namespace knative-serving --ignore-not-found=true
-	kubectl delete namespace knative-eventing --ignore-not-found=true
-	@echo "Cleanup complete!"
 
 .PHONY: test
 test: ## Run tests
