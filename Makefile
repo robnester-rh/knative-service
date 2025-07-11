@@ -14,21 +14,12 @@ help: ## Show this help message
 	@echo 'Targets:'
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / { printf "  %-15s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
 
-# Note: `kn quickstart kind` is an alternative way to do this (and that's what I've been using actually)
 .PHONY: setup-knative
-setup-knative: ## Install Knative Serving and Eventing components using the operator
-	@echo "Installing Knative Operator..."
-	kubectl apply -f https://github.com/knative/operator/releases/download/knative-v1.18.2/operator.yaml
-	@echo "Waiting for Knative Operator to be ready..."
-	kubectl wait --for=condition=ready pod -l app=knative-operator -n knative-operator --timeout=300s
-	@echo "Installing Knative Serving..."
-	kubectl apply -f config/knative-serving.yaml
-	@echo "Installing Knative Eventing..."
-	kubectl apply -f config/knative-eventing.yaml
-	@echo "Waiting for Knative components to be ready..."
-	kubectl wait --for=condition=ready pod -l app=controller -n knative-serving --timeout=600s
-	kubectl wait --for=condition=ready pod -l app=controller -n knative-eventing --timeout=600s
-	@echo "Knative setup complete!"
+setup-knative: ## Install and configure a kind cluster wit knative installed
+	@# Nuke the existing cluster if it exists
+	kind delete cluster -n knative
+	@# Create a new one
+	kn quickstart kind
 
 .PHONY: check-knative
 check-knative: ## Check if Knative is properly installed
