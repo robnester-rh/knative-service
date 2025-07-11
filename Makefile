@@ -38,6 +38,9 @@ deploy: check-knative ## Deploy the service using kustomize and ko
 	@echo "Using KO_DOCKER_REPO: $(KO_DOCKER_REPO)"
 	@echo "Using namespace: $(NAMESPACE)"
 	kustomize build config/dev/ | KO_DOCKER_REPO=$(KO_DOCKER_REPO) ko apply -f -
+	@echo "Waiting for pods to be ready..."
+	hack/wait-for-ready-pod.sh eventing.knative.dev/sourceName=snapshot-events $(NAMESPACE)
+	hack/wait-for-ready-pod.sh serving.knative.dev/configuration=conforma-verifier-listener $(NAMESPACE)
 	@echo "Deployment complete!"
 
 .PHONY: deploy-with-knative-setup
