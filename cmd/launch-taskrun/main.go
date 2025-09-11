@@ -20,10 +20,11 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	coretypedv1 "k8s.io/client-go/kubernetes/typed/core/v1"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 
 	gozap "go.uber.org/zap"
+
+	"github.com/conforma/conforma-verifier-listener/cmd/launch-taskrun/k8s"
+	"github.com/conforma/conforma-verifier-listener/cmd/launch-taskrun/konflux"
 )
 
 // --- Interfaces for testability ---
@@ -172,11 +173,6 @@ func (r *realCloudEventsClient) StartReceiver(ctx context.Context, fn interface{
 }
 
 // --- Service and business logic ---
-type Snapshot struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
-	Spec              json.RawMessage `json:"spec,omitempty"`
-}
 
 type CloudEventData struct {
 	APIVersion string `json:"apiVersion"`
@@ -235,18 +231,9 @@ func NewServiceWithDependencies(k8s K8sClient, tekton TektonClient, logger Logge
 }
 
 func NewService(config ServiceConfig) (*Service, error) {
-	var k8sConfig *rest.Config
-	var err error
-	k8sConfig, err = rest.InClusterConfig()
+	k8sConfig, err := k8s.NewK8sConfig()
 	if err != nil {
-		kubeconfig := os.Getenv("KUBECONFIG")
-		if kubeconfig == "" {
-			kubeconfig = os.Getenv("HOME") + "/.kube/config"
-		}
-		k8sConfig, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get kubeconfig: %w", err)
-		}
+		return nil, err
 	}
 	k8sClient, err := kubernetes.NewForConfig(k8sConfig)
 	if err != nil {
@@ -275,17 +262,18 @@ func (s *Service) handleCloudEvent(ctx context.Context, event cloudevents.Event)
 		return nil
 	}
 	s.logger.Info("Processing Snapshot", gozap.String("name", eventData.Metadata.Name), gozap.String("namespace", eventData.Metadata.Namespace))
-	snapshot := &Snapshot{
+	snapshot := &konflux.Snapshot{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      eventData.Metadata.Name,
 			Namespace: eventData.Metadata.Namespace,
 		},
-		Spec: eventData.Spec,
 	}
+	// Assign the raw spec data directly
+	snapshot.Spec = eventData.Spec
 	return s.processSnapshot(ctx, snapshot)
 }
 
-func (s *Service) processSnapshot(ctx context.Context, snapshot *Snapshot) error {
+func (s *Service) processSnapshot(ctx context.Context, snapshot *konflux.Snapshot) error {
 	s.logger.Info("Starting to process snapshot", gozap.String("name", snapshot.Name), gozap.String("namespace", snapshot.Namespace))
 
 	config, err := s.readConfigMap(ctx, snapshot.Namespace)
@@ -345,13 +333,18 @@ func (s *Service) readConfigMap(ctx context.Context, namespace string) (*TaskRun
 	return config, nil
 }
 
-func (s *Service) createTaskRun(snapshot *Snapshot, config *TaskRunConfig) (*tektonv1.TaskRun, error) {
-	specJSON, err := json.Marshal(snapshot.Spec)
-	// log the specJSON
-	s.logger.Info("SpecJSON", gozap.String("specJSON", string(specJSON)))
-	if err != nil {
+func (s *Service) createTaskRun(snapshot *konflux.Snapshot, config *TaskRunConfig) (*tektonv1.TaskRun, error) {
+	// Use the raw JSON spec directly
+	specJSON := snapshot.Spec
+
+	// It seems unlikely we'll get invalid json but let's be defensive
+	var validationTarget interface{}
+	if err := json.Unmarshal(specJSON, &validationTarget); err != nil {
 		return nil, fmt.Errorf("failed to marshal snapshot spec: %w", err)
 	}
+
+	// log the specJSON
+	s.logger.Info("SpecJSON", gozap.String("specJSON", string(specJSON)))
 	// Helper function to create ParamValue with validation
 	createParamValue := func(value string) tektonv1.ParamValue {
 		if value == "" {

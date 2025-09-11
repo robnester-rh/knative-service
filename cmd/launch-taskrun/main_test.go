@@ -14,6 +14,8 @@ import (
 	"go.uber.org/zap/zaptest"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/conforma/conforma-verifier-listener/cmd/launch-taskrun/konflux"
 )
 
 // --- Mock implementations ---
@@ -280,12 +282,12 @@ func TestCreateTaskRun_Success(t *testing.T) {
 
 	service := NewServiceWithDependencies(mockK8s, mockTekton, zaplog, ServiceConfig{})
 
-	snapshot := &Snapshot{
+	snapshot := &konflux.Snapshot{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-snapshot",
 			Namespace: "test-namespace",
 		},
-		Spec: json.RawMessage(`{"components":[{"name":"test-component","containerImage":"test-image:latest"}]}`),
+		Spec: json.RawMessage(`{"application":"test-app","components":[{"name":"test-component","containerImage":"test-image:latest"}]}`),
 	}
 
 	config := &TaskRunConfig{
@@ -323,6 +325,7 @@ func TestCreateTaskRun_Success(t *testing.T) {
 	assert.Equal(t, "true", params["INFO"])
 	assert.Equal(t, "true", params["show-successes"])
 	assert.Equal(t, "1", params["WORKERS"])
+	assert.Contains(t, params["IMAGES"], "test-app")
 	assert.Contains(t, params["IMAGES"], "test-component")
 }
 
@@ -333,7 +336,7 @@ func TestCreateTaskRun_InvalidSpec(t *testing.T) {
 
 	service := NewServiceWithDependencies(mockK8s, mockTekton, zaplog, ServiceConfig{})
 
-	snapshot := &Snapshot{
+	snapshot := &konflux.Snapshot{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-snapshot",
 			Namespace: "test-namespace",
@@ -359,12 +362,12 @@ func TestProcessSnapshot_Success(t *testing.T) {
 
 	service := NewServiceWithDependencies(mockK8s, mockTekton, zaplog, ServiceConfig{})
 
-	snapshot := &Snapshot{
+	snapshot := &konflux.Snapshot{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-snapshot",
 			Namespace: "test-namespace",
 		},
-		Spec: json.RawMessage(`{"components":[{"name":"test-component","containerImage":"test-image:latest"}]}`),
+		Spec: json.RawMessage(`{"application":"test-application","components":[{"name":"test-component","containerImage":"test-image:latest"}]}`),
 	}
 
 	// Setup configmap mock
@@ -412,12 +415,12 @@ func TestProcessSnapshot_ConfigMapError(t *testing.T) {
 
 	service := NewServiceWithDependencies(mockK8s, mockTekton, zaplog, ServiceConfig{})
 
-	snapshot := &Snapshot{
+	snapshot := &konflux.Snapshot{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-snapshot",
 			Namespace: "test-namespace",
 		},
-		Spec: json.RawMessage(`{"components":[{"name":"test-component","containerImage":"test-image:latest"}]}`),
+		Spec: json.RawMessage(`{"application":"test-application","components":[{"name":"test-component","containerImage":"test-image:latest"}]}`),
 	}
 
 	// Setup configmap error
@@ -443,12 +446,12 @@ func TestProcessSnapshot_TaskRunCreationError(t *testing.T) {
 
 	service := NewServiceWithDependencies(mockK8s, mockTekton, zaplog, ServiceConfig{})
 
-	snapshot := &Snapshot{
+	snapshot := &konflux.Snapshot{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-snapshot",
 			Namespace: "test-namespace",
 		},
-		Spec: json.RawMessage(`{"components":[{"name":"test-component","containerImage":"test-image:latest"}]}`),
+		Spec: json.RawMessage(`{"application":"test-application","components":[{"name":"test-component","containerImage":"test-image:latest"}]}`),
 	}
 
 	// Setup configmap mock
