@@ -8,8 +8,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// ClientReader interface captures only the read operations we need for testability
+type ClientReader interface {
+	Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error
+	List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error
+}
+
 // findReleasePlan looks for a release plan applicable for a given application
-func FindReleasePlan(ctx context.Context, cli client.Client, appName string, ns string) (ReleasePlan, error) {
+func FindReleasePlan(ctx context.Context, cli ClientReader, appName string, ns string) (ReleasePlan, error) {
 	var rp ReleasePlan
 
 	// Get all release plans in the namespace
@@ -42,7 +48,7 @@ func FindReleasePlan(ctx context.Context, cli client.Client, appName string, ns 
 	return rp, nil
 }
 
-func FindReleasePlanAdmission(ctx context.Context, cli client.Client, rp ReleasePlan) (ReleasePlanAdmission, error) {
+func FindReleasePlanAdmission(ctx context.Context, cli ClientReader, rp ReleasePlan) (ReleasePlanAdmission, error) {
 	// The RP points to a one specific RPA. Look it up using the target and a label value:
 	var rpa ReleasePlanAdmission
 	rpaKey := client.ObjectKey{
@@ -58,7 +64,7 @@ func FindReleasePlanAdmission(ctx context.Context, cli client.Client, rp Release
 
 // FindECP takes a snapshot and tries to find the ECP that would be applicable in the
 // Konflux release pipeline if that snapshot was released by looking up the relevant RPA
-func FindEnterpriseContractPolicy(ctx context.Context, cli client.Client, snapshot *Snapshot) (string, error) {
+func FindEnterpriseContractPolicy(ctx context.Context, cli ClientReader, snapshot *Snapshot) (string, error) {
 	// TODO: There might be a way to look this up which would be preferable to hard-coding it here
 	const defaultEcpName = "registry-standard"
 

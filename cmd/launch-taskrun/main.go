@@ -22,6 +22,7 @@ import (
 	coretypedv1 "k8s.io/client-go/kubernetes/typed/core/v1"
 
 	gozap "go.uber.org/zap"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/conforma/conforma-verifier-listener/cmd/launch-taskrun/k8s"
 	"github.com/conforma/conforma-verifier-listener/cmd/launch-taskrun/konflux"
@@ -50,6 +51,11 @@ type TektonV1 interface {
 
 type TektonClient interface {
 	TektonV1() TektonV1
+}
+
+type ControllerRuntimeClient interface {
+	Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error
+	List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error
 }
 
 // --- Logger interface and zapLogger ---
@@ -172,6 +178,18 @@ func (r *realCloudEventsClient) StartReceiver(ctx context.Context, fn interface{
 	return r.client.StartReceiver(ctx, fn)
 }
 
+type realControllerRuntimeClient struct {
+	client client.Client
+}
+
+func (r *realControllerRuntimeClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	return r.client.Get(ctx, key, obj, opts...)
+}
+
+func (r *realControllerRuntimeClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	return r.client.List(ctx, list, opts...)
+}
+
 // --- Service and business logic ---
 
 type CloudEventData struct {
@@ -204,6 +222,7 @@ type TaskRunConfig struct {
 type Service struct {
 	k8sClient     K8sClient
 	tektonClient  TektonClient
+	crtlClient    ControllerRuntimeClient
 	logger        Logger
 	configMapName string
 	configCache   *configMapCache
@@ -214,7 +233,7 @@ type ServiceConfig struct {
 	CacheTTL      time.Duration
 }
 
-func NewServiceWithDependencies(k8s K8sClient, tekton TektonClient, logger Logger, config ServiceConfig) *Service {
+func NewServiceWithDependencies(k8s K8sClient, tekton TektonClient, crtlClient ControllerRuntimeClient, logger Logger, config ServiceConfig) *Service {
 	if config.ConfigMapName == "" {
 		config.ConfigMapName = "taskrun-config"
 	}
@@ -224,6 +243,7 @@ func NewServiceWithDependencies(k8s K8sClient, tekton TektonClient, logger Logge
 	return &Service{
 		k8sClient:     k8s,
 		tektonClient:  tekton,
+		crtlClient:    crtlClient,
 		logger:        logger,
 		configMapName: config.ConfigMapName,
 		configCache:   newConfigMapCache(config.CacheTTL),
@@ -243,9 +263,14 @@ func NewService(config ServiceConfig) (*Service, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create tekton client: %w", err)
 	}
+	crtlClient, err := k8s.NewControllerRuntimeClient()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create controller-runtime client: %w", err)
+	}
 	return NewServiceWithDependencies(
 		&realK8sClient{client: k8sClient},
 		&realTektonClient{client: tektonClient},
+		&realControllerRuntimeClient{client: crtlClient},
 		&zapLogger{l: gozap.NewExample()},
 		config,
 	), nil
@@ -333,6 +358,11 @@ func (s *Service) readConfigMap(ctx context.Context, namespace string) (*TaskRun
 	return config, nil
 }
 
+func (s *Service) findEcp(snapshot *konflux.Snapshot) (string, error) {
+	ctx := context.Background()
+	return konflux.FindEnterpriseContractPolicy(ctx, s.crtlClient, snapshot)
+}
+
 func (s *Service) createTaskRun(snapshot *konflux.Snapshot, config *TaskRunConfig) (*tektonv1.TaskRun, error) {
 	// Use the raw JSON spec directly
 	specJSON := snapshot.Spec
@@ -353,8 +383,19 @@ func (s *Service) createTaskRun(snapshot *konflux.Snapshot, config *TaskRunConfi
 		return tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: value}
 	}
 
+	ecp, err := s.findEcp(snapshot)
+	if err != nil {
+		// Fall back to the default
+		// TODO: We might reconsider the value in generating the VSA in this
+		// scenario. Perhaps it's better to bail out and do nothing.
+		ecp = config.PolicyConfiguration
+		s.logger.Info("Unable to find RPA in cluster. Falling back to default.", gozap.Error(err))
+	} else {
+		s.logger.Info("Found RPA in cluster. Using correct ECP.")
+	}
+
 	params := []tektonv1.Param{
-		{Name: "POLICY_CONFIGURATION", Value: createParamValue(config.PolicyConfiguration)},
+		{Name: "POLICY_CONFIGURATION", Value: createParamValue(ecp)},
 		{Name: "PUBLIC_KEY", Value: createParamValue(config.PublicKey)},
 		{Name: "IGNORE_REKOR", Value: createParamValue(config.IgnoreRekor)},
 		{Name: "STRICT", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "true"}},
