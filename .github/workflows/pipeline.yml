@@ -218,8 +218,8 @@ jobs:
         
         ko build --bare \
           --tags="$IMAGE_TAG,latest" \
-          --label="org.opencontainers.image.revision=$COMMIT_SHA" \
-          --label="org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
+          --image-label="org.opencontainers.image.revision=$COMMIT_SHA" \
+          --image-label="org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
           ./cmd/launch-taskrun
         
         echo "✅ Image pushed to ${{ env.QUAY_REPOSITORY }}:$IMAGE_TAG"
@@ -288,13 +288,13 @@ jobs:
         # Build and push with version tag and OCI labels
         ko build --bare \
           --tags="$VERSION,$VERSION-$SHORT_SHA,latest" \
-          --label="org.opencontainers.image.version=$VERSION" \
-          --label="org.opencontainers.image.revision=$COMMIT_SHA" \
-          --label="org.opencontainers.image.created=$BUILD_DATE" \
-          --label="org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
-          --label="org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}" \
-          --label="org.opencontainers.image.title=Conforma Verifier Listener" \
-          --label="org.opencontainers.image.description=Kubernetes-native event-driven service for enterprise contract verification" \
+          --image-label="org.opencontainers.image.version=$VERSION" \
+          --image-label="org.opencontainers.image.revision=$COMMIT_SHA" \
+          --image-label="org.opencontainers.image.created=$BUILD_DATE" \
+          --image-label="org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
+          --image-label="org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}" \
+          --image-label="org.opencontainers.image.title=Conforma Verifier Listener" \
+          --image-label="org.opencontainers.image.description=Kubernetes-native event-driven service for enterprise contract verification" \
           ./cmd/launch-taskrun
         
         echo "✅ Release image pushed to $KO_DOCKER_REPO:$VERSION"
