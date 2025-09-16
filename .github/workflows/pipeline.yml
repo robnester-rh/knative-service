@@ -1,0 +1,308 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'  # Trigger releases on version tags
+  pull_request:
+    branches: [ main ]
+  pull_request_target:
+    branches: [ main ]
+    types: [opened, synchronize, reopened]
+
+env:
+  GO_VERSION: '1.24'
+  QUAY_REPOSITORY: 'quay.io/conforma/knative-service'
+
+permissions:
+  contents: write        # Required for creating releases
+  packages: write        # Required for pushing to container registries
+  pull-requests: write   # Required for commenting on pull requests
+  issues: write          # Required for commenting on issues
+
+jobs:
+  test-and-validate:
+    name: Test and Validate
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      with:
+        fetch-depth: 0  # Fetch full history for changelog generation
+      
+    - name: Set up Go
+      uses: actions/setup-go@0a12ed9d6a96ab950c8f026ed9f722fe0da7ef32 # v5.0.2
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        
+    - name: Cache Go modules
+      uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+      with:
+        path: ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-
+          
+    - name: Download dependencies
+      run: go mod download
+      
+    - name: Format check
+      run: |
+        if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
+          echo "❌ Code is not properly formatted. Run 'make fmt'"
+          gofmt -s -l .
+          exit 1
+        fi
+        echo "✅ Code is properly formatted"
+        
+    - name: Run tests with coverage
+      run: |
+        go test -v -race -coverprofile=coverage.out ./...
+        COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}' | sed 's/%//')
+        echo "Test coverage: $COVERAGE%"
+        go tool cover -html=coverage.out -o coverage.html
+        
+    - name: Upload coverage reports
+      uses: codecov/codecov-action@e28ff129e5465c2c0dcc6f003fc735cb6ae0c673 # v4.5.0
+      if: github.event_name == 'push' || github.event_name == 'pull_request'
+      with:
+        file: ./coverage.out
+        flags: unittests
+        name: codecov-umbrella
+        
+    - name: Run linter
+      uses: golangci/golangci-lint-action@aaa42aa0628b4ae2578232a66b541047968fac86 # v6.1.0
+      with:
+        version: latest
+        args: --timeout=5m --config=.golangci.yml
+        
+    - name: Validate Kubernetes manifests
+      run: |
+        # Install kustomize
+        curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+        sudo mv kustomize /usr/local/bin/
+        
+        # Validate base configuration
+        echo "Validating base configuration..."
+        kustomize build config/base/ > /tmp/base-output.yaml
+        
+        # Validate dev configuration  
+        echo "Validating dev configuration..."
+        kustomize build config/dev/ > /tmp/dev-output.yaml
+        
+        echo "✅ All Kubernetes manifests validate successfully"
+        
+    - name: Test container build
+      run: |
+        # Install ko for testing
+        go install github.com/google/ko@latest
+        
+        # Test that the container builds (without pushing)
+        KO_DOCKER_REPO=ko.local ko build --local ./cmd/launch-taskrun
+        
+        echo "✅ Container builds successfully"
+        
+    - name: Security scan with Gosec
+      run: |
+        # Install gosec
+        go install github.com/securego/gosec/v2/cmd/gosec@c9453023c4e81ebdb6dde29e22d9cd5e2285fb16 #v2.22.8
+        # Run security scan
+        $(go env GOPATH)/bin/gosec ./...
+
+  pr-comment:
+    name: PR Summary Comment
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request_target'
+    permissions:
+      pull-requests: write
+      issues: write
+      actions: read  # Needed to check workflow status
+    
+    steps:
+    - name: Wait for validation to complete
+      uses: fountainhead/action-wait-for-check@v1.2.0
+      id: wait-for-validation
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        checkName: "Test and Validate"
+        ref: ${{ github.event.pull_request.head.sha }}
+        timeoutSeconds: 1800  # 30 minutes
+        intervalSeconds: 30
+        
+    - name: Add PR Summary Comment
+      if: steps.wait-for-validation.outputs.conclusion == 'success'
+      uses: peter-evans/create-or-update-comment@c6c9a1a66007646a28c153e2a8580a5bad27bcfa # v4.0.0
+      with:
+        issue-number: ${{ github.event.pull_request.number }}
+        body: |
+          ## 🧪 PR Validation Results
+          
+          ✅ **Tests**: All tests passing
+          ✅ **Coverage**: Test coverage reported
+          ✅ **Linting**: Code quality checks passed
+          ✅ **Kubernetes**: All manifests validate
+          ✅ **Container**: Build successful
+          ✅ **Security**: No security issues detected
+          
+          **Ready for merge!** 🚀
+        reactions: '+1'
+        
+    - name: Add failure comment
+      if: steps.wait-for-validation.outputs.conclusion == 'failure'
+      uses: peter-evans/create-or-update-comment@c6c9a1a66007646a28c153e2a8580a5bad27bcfa # v4.0.0
+      with:
+        issue-number: ${{ github.event.pull_request.number }}
+        body: |
+          ## ❌ PR Validation Failed
+          
+          Some validation checks failed. Please check the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details.
+          
+          **Please fix the issues and push new changes.** 🔧
+        reactions: '-1'
+
+  build-and-push:
+    name: Build and Push Container Image
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      
+    - name: Set up Go
+      uses: actions/setup-go@0a12ed9d6a96ab950c8f026ed9f722fe0da7ef32 # v5.0.2
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        
+    - name: Install ko
+      uses: ko-build/setup-ko@ace48d793556083a76f1e3e6068850c1f4a369aa # v0.6
+      
+    - name: Log in to Quay.io
+      uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
+      with:
+        registry: quay.io
+        username: ${{ secrets.QUAY_USERNAME }}
+        password: ${{ secrets.QUAY_PASSWORD }}
+        
+    - name: Build and push image
+      env:
+        KO_DOCKER_REPO: ${{ env.QUAY_REPOSITORY }}
+      run: |
+        # Build and push with commit SHA tag
+        export IMAGE_TAG="main-$(git rev-parse --short HEAD)"
+        ko build --bare --tags=$IMAGE_TAG,latest ./cmd/launch-taskrun
+        
+        echo "✅ Image pushed to ${{ env.QUAY_REPOSITORY }}:$IMAGE_TAG"
+        echo "✅ Image pushed to ${{ env.QUAY_REPOSITORY }}:latest"
+        
+    - name: Generate SBOM
+      run: |
+        echo "✅ SBOM automatically generated by ko"
+        
+    - name: Update deployment tracking
+      run: |
+        echo "📝 Image built from commit: $(git rev-parse HEAD)"
+        echo "📝 Available at: ${{ env.QUAY_REPOSITORY }}:main-$(git rev-parse --short HEAD)"
+
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      with:
+        fetch-depth: 0  # Fetch full history for changelog
+        
+    - name: Set up Go
+      uses: actions/setup-go@0a12ed9d6a96ab950c8f026ed9f722fe0da7ef32 # v5.0.2
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        
+    - name: Install ko
+      uses: ko-build/setup-ko@ace48d793556083a76f1e3e6068850c1f4a369aa # v0.6
+      
+    - name: Log in to Quay.io
+      uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
+      with:
+        registry: quay.io
+        username: ${{ secrets.QUAY_USERNAME }}
+        password: ${{ secrets.QUAY_PASSWORD }}
+        
+    - name: Extract version from tag
+      id: version
+      run: |
+        VERSION=${GITHUB_REF#refs/tags/}
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "short_sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+        
+    - name: Build and push release image
+      env:
+        KO_DOCKER_REPO: ${{ env.QUAY_REPOSITORY }}
+        VERSION: ${{ steps.version.outputs.version }}
+        SHORT_SHA: ${{ steps.version.outputs.short_sha }}
+      run: |
+        # Build and push with version tag
+        ko build --bare --tags=$VERSION,$VERSION-$SHORT_SHA,latest ./cmd/launch-taskrun
+        
+        echo "✅ Release image pushed to $KO_DOCKER_REPO:$VERSION"
+        echo "✅ Release image pushed to $KO_DOCKER_REPO:$VERSION-$SHORT_SHA"
+        echo "✅ Latest tag updated to $KO_DOCKER_REPO:latest"
+        
+    - name: Generate changelog
+      id: changelog
+      run: |
+        # Get previous tag for changelog
+        PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+        
+        if [ -n "$PREVIOUS_TAG" ]; then
+          echo "## Changes since $PREVIOUS_TAG" > CHANGELOG.md
+          git log --oneline $PREVIOUS_TAG..HEAD >> CHANGELOG.md
+        else
+          echo "## Initial Release" > CHANGELOG.md
+          echo "First release of Conforma Verifier Listener" >> CHANGELOG.md
+        fi
+        
+        echo "changelog<<EOF" >> $GITHUB_OUTPUT
+        cat CHANGELOG.md >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+        
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@c062e08bd532815e2082a85e87e3ef29c3e6d191 # v2.0.8
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.version.outputs.version }}
+        name: Release ${{ steps.version.outputs.version }}
+        body: |
+          # Conforma Verifier Listener ${{ steps.version.outputs.version }}
+          
+          ## 🚀 Container Images
+          - **Latest**: `${{ env.QUAY_REPOSITORY }}:${{ steps.version.outputs.version }}`
+          - **Commit-specific**: `${{ env.QUAY_REPOSITORY }}:${{ steps.version.outputs.version }}-${{ steps.version.outputs.short_sha }}`
+          
+          ## 📋 Deployment
+          
+          ### Using Release Image
+          Update your kustomization to use the release image:
+          ```yaml
+          images:
+          - name: ko://github.com/conforma/conforma-verifier-listener/cmd/launch-taskrun
+            newName: ${{ env.QUAY_REPOSITORY }}
+            newTag: ${{ steps.version.outputs.version }}
+          ```
+          
+          ## 🔐 Security Features
+          - SBOM generation included
+          - Supply chain security ready
+          
+          ## 📚 Documentation
+          - [README](README.md)
+          
+          ${{ steps.changelog.outputs.changelog }}
+        draft: false
+        prerelease: false
