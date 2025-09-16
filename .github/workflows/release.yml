@@ -7,7 +7,7 @@ on:
 
 env:
   GO_VERSION: '1.24'
-  QUAY_REPOSITORY: 'quay.io/robnester_rh/knative-service'
+  QUAY_REPOSITORY: 'quay.io/conforma/knative-service'
 
 jobs:
   create-release:
@@ -78,12 +78,12 @@ jobs:
         echo "EOF" >> $GITHUB_OUTPUT
         
     - name: Create GitHub Release
-      uses: actions/create-release@0cb9c9b65d5d1901c1f53e5e66eaf4afd303e70e # v1.1.4
+      uses: softprops/action-gh-release@c062e08bd532815e2082a85e87e3ef29c3e6d191 # v2.0.8
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         tag_name: ${{ steps.version.outputs.version }}
-        release_name: Release ${{ steps.version.outputs.version }}
+        name: Release ${{ steps.version.outputs.version }}
         body: |
           # Conforma Verifier Listener ${{ steps.version.outputs.version }}
           
