@@ -109,6 +109,10 @@ func (c *configMapCache) set(key string, config *TaskRunConfig) {
 	}
 }
 
+// clear removes all entries from the cache
+// This method is currently unused but kept for potential future use
+//
+//nolint:unused // Utility function kept for future use
 func (c *configMapCache) clear() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
