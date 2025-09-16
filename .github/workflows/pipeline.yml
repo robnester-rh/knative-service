@@ -18,7 +18,7 @@ env:
   GO_VERSION: '1.24'
   QUAY_REPOSITORY: 'quay.io/conforma/knative-service'
   GOSEC_VERSION: 'c9453023c4e81ebdb6dde29e22d9cd5e2285fb16' # v2.22.8
-  KO_VERSION: 'v0.16.0'  # Pin ko version for reproducibility
+  KO_VERSION: 'v0.18.0'  # Pin ko version for reproducibility
 
 permissions:
   contents: read  # Default read access
