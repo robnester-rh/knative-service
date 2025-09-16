@@ -23,11 +23,22 @@ import (
 	"log"
 	"os"
 
+	gozap "go.uber.org/zap"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/conforma/conforma-verifier-listener/cmd/launch-taskrun/k8s"
 	"github.com/conforma/conforma-verifier-listener/cmd/launch-taskrun/konflux"
 )
+
+// zapLogger wraps a zap logger to implement our Logger interface
+type zapLogger struct {
+	l *gozap.Logger
+}
+
+func (z *zapLogger) Info(msg string, fields ...gozap.Field) { z.l.Info(msg, fields...) }
+func (z *zapLogger) Error(err error, msg string, fields ...gozap.Field) {
+	z.l.Error(msg, append(fields, gozap.Error(err))...)
+}
 
 func main() {
 	if len(os.Args) < 3 {
@@ -64,8 +75,18 @@ func main() {
 	}
 	fmt.Printf("Application name: %s\n", spec.Application)
 
+	// Create a development logger for nice console output
+	zapLog, err := gozap.NewDevelopment()
+	if err != nil {
+		log.Fatalf("Failed to create logger: %v", err)
+	}
+	defer func() {
+		_ = zapLog.Sync() // Ignore sync errors (common with stderr/stdout)
+	}()
+	logger := &zapLogger{l: zapLog}
+
 	// Call FindEnterpriseContractPolicy
-	policyResult, err := konflux.FindEnterpriseContractPolicy(context.Background(), cli, snapshot)
+	policyResult, err := konflux.FindEnterpriseContractPolicy(context.Background(), cli, logger, snapshot)
 	if err != nil {
 		log.Fatalf("Failed to get enterprise contract policy: %v", err)
 	}

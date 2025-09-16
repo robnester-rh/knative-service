@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	gozap "go.uber.org/zap"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -14,8 +15,14 @@ type ClientReader interface {
 	List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error
 }
 
+// Logger interface for logging in the konflux package
+type Logger interface {
+	Info(msg string, fields ...gozap.Field)
+	Error(err error, msg string, fields ...gozap.Field)
+}
+
 // findReleasePlan looks for a release plan applicable for a given application
-func FindReleasePlan(ctx context.Context, cli ClientReader, appName string, ns string) (ReleasePlan, error) {
+func FindReleasePlan(ctx context.Context, cli ClientReader, logger Logger, appName string, ns string) (ReleasePlan, error) {
 	var rp ReleasePlan
 
 	// Get all release plans in the namespace
@@ -48,7 +55,7 @@ func FindReleasePlan(ctx context.Context, cli ClientReader, appName string, ns s
 	return rp, nil
 }
 
-func FindReleasePlanAdmission(ctx context.Context, cli ClientReader, rp ReleasePlan) (ReleasePlanAdmission, error) {
+func FindReleasePlanAdmission(ctx context.Context, cli ClientReader, logger Logger, rp ReleasePlan) (ReleasePlanAdmission, error) {
 	// The RP points to a one specific RPA. Look it up using the target and a label value:
 	var rpa ReleasePlanAdmission
 	rpaKey := client.ObjectKey{
@@ -64,7 +71,7 @@ func FindReleasePlanAdmission(ctx context.Context, cli ClientReader, rp ReleaseP
 
 // FindECP takes a snapshot and tries to find the ECP that would be applicable in the
 // Konflux release pipeline if that snapshot was released by looking up the relevant RPA
-func FindEnterpriseContractPolicy(ctx context.Context, cli ClientReader, snapshot *Snapshot) (string, error) {
+func FindEnterpriseContractPolicy(ctx context.Context, cli ClientReader, logger Logger, snapshot *Snapshot) (string, error) {
 	// TODO: There might be a way to look this up which would be preferable to hard-coding it here
 	const defaultEcpName = "registry-standard"
 
@@ -80,16 +87,18 @@ func FindEnterpriseContractPolicy(ctx context.Context, cli ClientReader, snapsho
 	ns := snapshot.Namespace
 
 	// Find the applicable ReleasePlan for this application
-	rp, err := FindReleasePlan(ctx, cli, appName, ns)
+	rp, err := FindReleasePlan(ctx, cli, logger, appName, ns)
 	if err != nil {
 		return "", err
 	}
+	logger.Info("Found ReleasePlan", gozap.String("name", rp.Name), gozap.String("namespace", rp.Namespace))
 
 	// Use the ReleasePlan to find the relevant ReleasePlanAdmission
-	rpa, err := FindReleasePlanAdmission(ctx, cli, rp)
+	rpa, err := FindReleasePlanAdmission(ctx, cli, logger, rp)
 	if err != nil {
 		return "", err
 	}
+	logger.Info("Found ReleasePlanAdmission", gozap.String("name", rpa.Name), gozap.String("namespace", rpa.Namespace))
 
 	// Read the ECP name from the ReleasePlanAdmission
 	ecpName := rpa.Spec.Policy
@@ -98,9 +107,15 @@ func FindEnterpriseContractPolicy(ctx context.Context, cli ClientReader, snapsho
 	ecpNamespace := rpa.Namespace
 
 	// Fall back to the default value if the RPA doesn't set a policy
+	var logMsg string
 	if ecpName == "" {
 		ecpName = defaultEcpName
+		logMsg = "No policy specified in RPA, using default"
+	} else {
+		logMsg = "Using policy specified in RPA"
 	}
+
+	logger.Info(logMsg, gozap.String("name", ecpName), gozap.String("namespace", ecpNamespace))
 
 	// Example value: rhtap-releng-tenant/registry-rhtap-contract
 	// Conforma can use this directly with its --policy flag

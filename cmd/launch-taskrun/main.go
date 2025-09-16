@@ -360,7 +360,7 @@ func (s *Service) readConfigMap(ctx context.Context, namespace string) (*TaskRun
 
 func (s *Service) findEcp(snapshot *konflux.Snapshot) (string, error) {
 	ctx := context.Background()
-	return konflux.FindEnterpriseContractPolicy(ctx, s.crtlClient, snapshot)
+	return konflux.FindEnterpriseContractPolicy(ctx, s.crtlClient, s.logger, snapshot)
 }
 
 func (s *Service) createTaskRun(snapshot *konflux.Snapshot, config *TaskRunConfig) (*tektonv1.TaskRun, error) {

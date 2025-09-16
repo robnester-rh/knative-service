@@ -7,10 +7,24 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	gozap "go.uber.org/zap"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
+
+// mockLogger implements the Logger interface for testing
+type mockLogger struct {
+	t *testing.T
+}
+
+func (m *mockLogger) Info(msg string, fields ...gozap.Field) {
+	m.t.Logf("INFO: %s %v", msg, fields)
+}
+
+func (m *mockLogger) Error(err error, msg string, fields ...gozap.Field) {
+	m.t.Logf("ERROR: %s: %v %v", msg, err, fields)
+}
 
 func TestFindECP_Success(t *testing.T) {
 	scheme := runtime.NewScheme()
@@ -55,8 +69,10 @@ func TestFindECP_Success(t *testing.T) {
 		WithObjects(releasePlan, rpa).
 		Build()
 
+	logger := &mockLogger{t: t}
+
 	// Test successful ECP lookup
-	ecp, err := FindEnterpriseContractPolicy(context.Background(), cli, snapshot)
+	ecp, err := FindEnterpriseContractPolicy(context.Background(), cli, logger, snapshot)
 
 	assert.NoError(t, err)
 	assert.Equal(t, "target-ns/custom-policy", ecp)
@@ -104,7 +120,9 @@ func TestFindECP_DefaultPolicy(t *testing.T) {
 		WithObjects(releasePlan, rpa).
 		Build()
 
-	ecp, err := FindEnterpriseContractPolicy(context.Background(), cli, snapshot)
+	logger := &mockLogger{t: t}
+
+	ecp, err := FindEnterpriseContractPolicy(context.Background(), cli, logger, snapshot)
 
 	assert.NoError(t, err)
 	assert.Equal(t, "target-ns/registry-standard", ecp)
@@ -126,7 +144,9 @@ func TestFindECP_NoReleasePlans(t *testing.T) {
 		WithScheme(scheme).
 		Build()
 
-	_, err := FindEnterpriseContractPolicy(context.Background(), cli, snapshot)
+	logger := &mockLogger{t: t}
+
+	_, err := FindEnterpriseContractPolicy(context.Background(), cli, logger, snapshot)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no release plans found in namespace")
@@ -161,7 +181,9 @@ func TestFindECP_NoMatchingApplication(t *testing.T) {
 		WithObjects(releasePlan).
 		Build()
 
-	_, err := FindEnterpriseContractPolicy(context.Background(), cli, snapshot)
+	logger := &mockLogger{t: t}
+
+	_, err := FindEnterpriseContractPolicy(context.Background(), cli, logger, snapshot)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no release plans found for application name: test-app")
@@ -198,7 +220,9 @@ func TestFindECP_RPANotFound(t *testing.T) {
 		WithObjects(releasePlan).
 		Build()
 
-	_, err := FindEnterpriseContractPolicy(context.Background(), cli, snapshot)
+	logger := &mockLogger{t: t}
+
+	_, err := FindEnterpriseContractPolicy(context.Background(), cli, logger, snapshot)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to get release plan admission")
