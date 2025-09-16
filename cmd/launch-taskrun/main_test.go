@@ -51,11 +51,12 @@ func (m *mockTektonTaskRunCreator) Create(ctx context.Context, taskRun *tektonv1
 	return args.Get(0).(*tektonv1.TaskRun), args.Error(1)
 }
 
-type mockLogger struct{ mock.Mock }
-
-func (m *mockLogger) Printf(format string, args ...interface{}) {
-	m.Called(append([]interface{}{format}, args...)...)
-}
+// mockLogger is kept for potential future use
+// type mockLogger struct{ mock.Mock }
+//
+// func (m *mockLogger) Printf(format string, args ...interface{}) {
+// 	m.Called(append([]interface{}{format}, args...)...)
+// }
 
 type mockCloudEventsClient struct {
 	mock.Mock
@@ -98,7 +99,9 @@ func TestHandleCloudEvent_ValidSnapshot(t *testing.T) {
 	eventJSON, _ := json.Marshal(eventData)
 	event := cloudevents.NewEvent()
 	event.SetType("dev.knative.apiserver.resource.add")
-	event.SetData(cloudevents.ApplicationJSON, eventJSON)
+	if err := event.SetData(cloudevents.ApplicationJSON, eventJSON); err != nil {
+		t.Fatalf("Failed to set event data: %v", err)
+	}
 
 	// Setup mock expectations
 	mockConfigMap := &corev1.ConfigMap{
@@ -154,7 +157,9 @@ func TestHandleCloudEvent_InvalidResource(t *testing.T) {
 	eventJSON, _ := json.Marshal(eventData)
 	event := cloudevents.NewEvent()
 	event.SetType("dev.knative.apiserver.resource.add")
-	event.SetData(cloudevents.ApplicationJSON, eventJSON)
+	if err := event.SetData(cloudevents.ApplicationJSON, eventJSON); err != nil {
+		t.Fatalf("Failed to set event data: %v", err)
+	}
 
 	err := service.handleCloudEvent(context.Background(), event)
 
