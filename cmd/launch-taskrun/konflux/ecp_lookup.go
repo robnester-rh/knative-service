@@ -47,10 +47,16 @@ func FindReleasePlan(ctx context.Context, cli ClientReader, logger Logger, appNa
 		return rp, fmt.Errorf("no release plans found for application name: %s", appName)
 	}
 
-	// Choose one of the release plans
-	// TODO: I'm expecting most of the time there will be only one releasePlan, but
-	// I'm not sure how correct that is. Could there be more than one? If there was
-	// more than one, how would we know which one to choose?
+	if len(matchingPlans) > 1 {
+		// TODO: I'm expecting most of the time there will be only one ReleasePlan, but
+		// I'm not sure how correct that is. Could there be more than one? If there was
+		// more than one, how would we know which one to choose? For now we'll log a
+		// warning with the details, and proceed with the first one found.
+		for _, plan := range matchingPlans {
+			rpa := fmt.Sprintf("%s/%s", plan.Spec.Target, plan.Labels["release.appstudio.openshift.io/releasePlanAdmission"])
+			logger.Warn("Found multiple ReleasePlans", gozap.String("RP", plan.Name), gozap.String("Related RPA", rpa))
+		}
+	}
 	rp = matchingPlans[0]
 
 	return rp, nil
