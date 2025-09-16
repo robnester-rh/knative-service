@@ -9,6 +9,10 @@ env:
   GO_VERSION: '1.24'
   QUAY_REPOSITORY: 'quay.io/conforma/knative-service'
 
+permissions:
+  contents: write  # Required for creating releases
+  packages: write  # Required for pushing to container registries
+
 jobs:
   create-release:
     name: Create Release
@@ -109,7 +113,6 @@ jobs:
           ```
           
           ## 🔐 Security Features
-          - VSA Attestation support (configurable via `ENABLE_VSA_ATTESTATION`)
           - SBOM generation included
           - Supply chain security ready
           
