@@ -1,0 +1,122 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags like v1.0.0
+
+env:
+  GO_VERSION: '1.24'
+  QUAY_REPOSITORY: 'quay.io/robnester_rh/knative-service'
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+      with:
+        fetch-depth: 0  # Fetch full history for changelog
+        
+    - name: Set up Go
+      uses: actions/setup-go@0a12ed9d6a96ab950c8f026ed9f722fe0da7ef32 # v5.0.2
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        
+    - name: Run tests
+      run: |
+        go test -v -race ./...
+        
+    - name: Install ko
+      uses: ko-build/setup-ko@ace48d793556083a76f1e3e6068850c1f4a369aa # v0.6
+      
+    - name: Log in to Quay.io
+      uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
+      with:
+        registry: quay.io
+        username: ${{ secrets.QUAY_USERNAME }}
+        password: ${{ secrets.QUAY_PASSWORD }}
+        
+    - name: Extract version from tag
+      id: version
+      run: |
+        VERSION=${GITHUB_REF#refs/tags/}
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "short_sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+        
+    - name: Build and push release image
+      env:
+        KO_DOCKER_REPO: ${{ env.QUAY_REPOSITORY }}
+        VERSION: ${{ steps.version.outputs.version }}
+        SHORT_SHA: ${{ steps.version.outputs.short_sha }}
+      run: |
+        # Build and push with version tag
+        ko build --bare --tags=$VERSION,$VERSION-$SHORT_SHA,latest ./cmd/launch-taskrun
+        
+        echo "✅ Release image pushed to $KO_DOCKER_REPO:$VERSION"
+        echo "✅ Release image pushed to $KO_DOCKER_REPO:$VERSION-$SHORT_SHA"
+        echo "✅ Latest tag updated to $KO_DOCKER_REPO:latest"
+        
+    - name: Generate changelog
+      id: changelog
+      run: |
+        # Get previous tag for changelog
+        PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+        
+        if [ -n "$PREVIOUS_TAG" ]; then
+          echo "## Changes since $PREVIOUS_TAG" > CHANGELOG.md
+          git log --oneline $PREVIOUS_TAG..HEAD >> CHANGELOG.md
+        else
+          echo "## Initial Release" > CHANGELOG.md
+          echo "First release of Conforma Verifier Listener" >> CHANGELOG.md
+        fi
+        
+        echo "changelog<<EOF" >> $GITHUB_OUTPUT
+        cat CHANGELOG.md >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+        
+    - name: Create GitHub Release
+      uses: actions/create-release@0cb9c9b65d5d1901c1f53e5e66eaf4afd303e70e # v1.1.4
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.version.outputs.version }}
+        release_name: Release ${{ steps.version.outputs.version }}
+        body: |
+          # Conforma Verifier Listener ${{ steps.version.outputs.version }}
+          
+          ## 🚀 Container Images
+          - **Latest**: `${{ env.QUAY_REPOSITORY }}:${{ steps.version.outputs.version }}`
+          - **Commit-specific**: `${{ env.QUAY_REPOSITORY }}:${{ steps.version.outputs.version }}-${{ steps.version.outputs.short_sha }}`
+          
+          ## 📋 Deployment
+          
+          ### Local Testing
+          ```bash
+          export KO_DOCKER_REPO=quay.io/robnester_rh/knative-service
+          make deploy-staging
+          ```
+          
+          ### Using Release Image
+          Update your kustomization to use the release image:
+          ```yaml
+          images:
+          - name: ko://github.com/conforma/conforma-verifier-listener/cmd/launch-taskrun
+            newName: ${{ env.QUAY_REPOSITORY }}
+            newTag: ${{ steps.version.outputs.version }}
+          ```
+          
+          ## 🔐 Security Features
+          - VSA Attestation support (configurable via `ENABLE_VSA_ATTESTATION`)
+          - SBOM generation included
+          - Supply chain security ready
+          
+          ## 📚 Documentation
+          - [Staging Deployment Guide](STAGING_DEPLOYMENT.md)
+          - [README](README.md)
+          
+          ${{ steps.changelog.outputs.changelog }}
+        draft: false
+        prerelease: false
