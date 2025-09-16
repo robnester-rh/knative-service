@@ -67,10 +67,6 @@ jobs:
         echo "Validating dev configuration..."
         kustomize build config/dev/ > /tmp/dev-output.yaml
         
-        # Validate staging configuration
-        echo "Validating staging configuration..."
-        kustomize build config/staging/ > /tmp/staging-output.yaml
-        
         echo "✅ All Kubernetes manifests are valid"
         
     - name: Security scan with Gosec

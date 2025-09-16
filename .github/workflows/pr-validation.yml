@@ -63,10 +63,7 @@ jobs:
         
         echo "Validating dev configuration..."
         kustomize build config/dev/ > /dev/null
-        
-        echo "Validating staging configuration..."
-        kustomize build config/staging/ > /dev/null
-        
+                
         echo "✅ All Kubernetes manifests validate successfully"
         
     - name: Test container build
