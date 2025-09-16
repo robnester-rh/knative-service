@@ -64,13 +64,52 @@ data:
 Deploy all components using Kustomize and ko:
 
 ```bash
-kustomize build config/ | ko apply -f -
+kustomize build config/dev/ | ko apply -f -
 ```
 
-This command will:
-1. Build the container image using ko
-2. Apply all Kubernetes resources (RBAC, ServiceAccount, Knative Service, etc.)
-3. Deploy the service to your cluster
+### Local Development
+
+Deploy to local development environment:
+
+```bash
+# Set your container registry
+export KO_DOCKER_REPO=your-registry/conforma
+
+# Deploy to local development
+make deploy-local
+
+# View logs
+make logs-local
+
+# Test functionality
+make test-local
+```
+
+### Staging-like Testing
+
+Test locally using Red Hat App Studio staging configuration:
+
+```bash
+# Deploy using infra-deployments staging config
+make deploy-staging-local
+
+# This fetches the actual staging configuration from infra-deployments
+# and deploys it locally for realistic testing
+```
+
+The service includes:
+- **VSA attestation**: Configurable supply chain security support
+- **Enterprise features**: Resource management and health monitoring capabilities
+- **Cloud-native design**: Stateless, scalable, Kubernetes-native
+
+### Manual Installation
+
+Deploy using Kustomize and ko directly:
+
+```bash
+# Development
+kustomize build config/dev/ | ko apply -f -
+```
 
 ## Usage
 
@@ -94,8 +133,41 @@ spec:
   displayDescription: my first snapshot
   components:
     - name: test-component
-      containerImage: "test-image:latest"
+      containerImage: "quay.io/redhat-user-workloads/rhtap-contract-tenant/golden-container/golden-container@sha256:185f6c39e5544479863024565bb7e63c6f2f0547c3ab4ddf99ac9b5755075cc9"
 ```
+
+## Make Targets
+
+The project includes comprehensive Make targets for development and deployment:
+
+### Development Targets
+- `make build` - Build the service using ko
+- `make test` - Run unit tests
+- `make test-coverage` - Run tests with coverage report
+- `make lint` - Run linter
+- `make fmt` - Format code
+- `make tidy` - Tidy go modules
+- `make status` - Show deployment status
+
+### Deployment Targets
+- `make deploy-with-knative-setup` - Setup Knative and deploy the service
+- `make logs` - Show logs from the service
+
+### Local Development
+- `make deploy-local` - Deploy to local development environment
+- `make undeploy-local` - Remove local deployment
+- `make logs-local` - View local service logs
+- `make test-local` - Test with sample snapshot
+- `make deploy-staging-local` - Deploy locally using infra-deployments staging config
+- `make undeploy-staging-local` - Remove staging-local deployment
+- `make logs-staging-local` - View staging-local service logs
+
+### Cluster Setup
+- `make setup-knative` - Install and configure kind cluster with Knative
+- `make check-knative` - Verify Knative installation
+
+### Help
+- `make help` - Show all available targets with descriptions
 
 ## Development
 
@@ -107,7 +179,7 @@ spec:
 * Run `make build`
 * Go to <https://quay.io/> and configure the `quay.io/yourquayuser/launch-taskrun-*`
   repo that was just created to be public instead of private.
-* Run `make deploy`
+* Run `make deploy-local`
 * Run `hack/demo.sh`
 
 ### Building
@@ -141,6 +213,17 @@ go run cmd/launch-taskrun/main.go
                        └──────────────────┘
 ```
 
+## Documentation
+
+### 🎯 Quick References
+- **Development**: Use `make help` to see all available commands
+- **Local Testing**: Use `make deploy-local` and `make test-local` for development
+- **Staging-like Testing**: Use `make deploy-staging-local` for realistic testing with infra-deployments config
+
+## Container Images
+
+The service is designed to be built and deployed using [ko](https://github.com/ko-build/ko), which handles container image building and deployment directly from Go source code.
+
 ## Contributing
 
 1. Fork the repository
@@ -148,6 +231,12 @@ go run cmd/launch-taskrun/main.go
 3. Make your changes
 4. Add tests for new functionality
 5. Submit a pull request
+
+### Development Workflow
+- Use `make test` to run unit tests
+- Use `make lint` and `make fmt` for code quality
+- Use `make deploy-local` for local testing
+- Use `make deploy-staging-local` for staging-like testing
 
 ## License
 
