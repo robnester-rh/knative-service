@@ -72,9 +72,9 @@ jobs:
     - name: Security scan with Gosec
       run: |
         # Install gosec
-        go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest
+        go install github.com/securego/gosec/v2/cmd/gosec@c9453023c4e81ebdb6dde29e22d9cd5e2285fb16 #v2.22.8
         # Run security scan
-        gosec ./...
+        $(go env GOPATH)/bin/gosec ./...
         
   build-and-push:
     name: Build and Push Container Image
