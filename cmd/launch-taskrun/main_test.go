@@ -300,11 +300,11 @@ func TestCreateTaskRun_Success(t *testing.T) {
 	assert.NotNil(t, taskRun)
 	assert.Equal(t, "test-namespace", taskRun.Namespace)
 	assert.Contains(t, taskRun.Name, "verify-enterprise-contract-test-snapshot-")
-	assert.Equal(t, tektonv1.ResolverName("bundles"), taskRun.Spec.TaskRef.ResolverRef.Resolver)
+	assert.Equal(t, tektonv1.ResolverName("bundles"), taskRun.Spec.TaskRef.Resolver)
 
 	// Check bundle resolver parameters
 	resolverParams := make(map[string]string)
-	for _, param := range taskRun.Spec.TaskRef.ResolverRef.Params {
+	for _, param := range taskRun.Spec.TaskRef.Params {
 		resolverParams[param.Name] = param.Value.StringVal
 	}
 	assert.Equal(t, "quay.io/conforma/tekton-task:latest", resolverParams["bundle"])

@@ -48,13 +48,27 @@ logs: ## Show logs from the service
 
 .PHONY: deploy-local
 deploy-local: check-knative ## Deploy the service to local development environment
-	@echo "Deploying conforma-verifier-listener..."
-	@echo "Using KO_DOCKER_REPO: $(KO_DOCKER_REPO)"
-	kustomize build config/dev/ | KO_DOCKER_REPO=$(KO_DOCKER_REPO) ko apply --bare -f -
-	@echo "Waiting for pods to be ready..."
-	hack/wait-for-ready-pod.sh eventing.knative.dev/sourceName=snapshot-events $(NAMESPACE)
-	hack/wait-for-ready-pod.sh serving.knative.dev/configuration=conforma-verifier-listener $(NAMESPACE)
-	@echo "Deployment complete!"
+	@if kubectl config current-context | grep -q "kind"; then \
+		echo "🔍 Detected kind cluster, using optimized local deployment..."; \
+		echo "🔨 Building image locally with ko..."; \
+		IMAGE_NAME=$$(ko build --local ./cmd/launch-taskrun 2>/dev/null | tail -1); \
+		echo "Built image: $$IMAGE_NAME"; \
+		echo "📦 Loading image into kind cluster..."; \
+		CLUSTER_NAME=$$(kubectl config current-context | sed 's/kind-//'); \
+		kind load docker-image "$$IMAGE_NAME" --name "$$CLUSTER_NAME"; \
+		echo "🚀 Deploying to cluster..."; \
+		export KO_DOCKER_REPO=ko.local && kustomize build config/dev/ | KO_DOCKER_REPO=$$KO_DOCKER_REPO ko resolve -f - | kubectl apply -f -; \
+		echo "⏳ Waiting for pods to be ready..."; \
+		hack/wait-for-ready-pod.sh serving.knative.dev/configuration=conforma-verifier-listener $(NAMESPACE); \
+	else \
+		echo "🌐 Using registry-based deployment for non-kind cluster..."; \
+		echo "Using KO_DOCKER_REPO: $(KO_DOCKER_REPO)"; \
+		kustomize build config/dev/ | KO_DOCKER_REPO=$(KO_DOCKER_REPO) ko apply --bare -f -; \
+		echo "⏳ Waiting for pods to be ready..."; \
+		hack/wait-for-ready-pod.sh eventing.knative.dev/sourceName=snapshot-events $(NAMESPACE); \
+		hack/wait-for-ready-pod.sh serving.knative.dev/configuration=conforma-verifier-listener $(NAMESPACE); \
+	fi
+	@echo "✅ Deployment complete!"
 	@echo "Service URL:"
 	@kubectl get ksvc conforma-verifier-listener -n $(NAMESPACE) -o jsonpath='{.status.url}' && echo
 

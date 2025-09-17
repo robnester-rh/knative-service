@@ -1,0 +1,9 @@
+# Ko configuration for kind cluster development
+defaultPlatforms:
+- linux/amd64
+defaultBaseImage: cgr.dev/chainguard/static:latest
+
+# For kind clusters, we build locally and load into the cluster
+builds:
+- id: ko://github.com/conforma/conforma-verifier-listener/cmd/launch-taskrun
+  main: ./cmd/launch-taskrun
