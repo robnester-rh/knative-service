@@ -61,6 +61,7 @@ type ControllerRuntimeClient interface {
 // --- Logger interface and zapLogger ---
 type Logger interface {
 	Info(msg string, fields ...gozap.Field)
+	Warn(msg string, fields ...gozap.Field)
 	Error(err error, msg string, fields ...gozap.Field)
 }
 
@@ -69,6 +70,7 @@ type zapLogger struct {
 }
 
 func (z *zapLogger) Info(msg string, fields ...gozap.Field) { z.l.Info(msg, fields...) }
+func (z *zapLogger) Warn(msg string, fields ...gozap.Field) { z.l.Warn(msg, fields...) }
 func (z *zapLogger) Error(err error, msg string, fields ...gozap.Field) {
 	z.l.Error(msg, append(fields, gozap.Error(err))...)
 }

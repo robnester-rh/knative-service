@@ -22,6 +22,10 @@ func (m *mockLogger) Info(msg string, fields ...gozap.Field) {
 	m.t.Logf("INFO: %s %v", msg, fields)
 }
 
+func (m *mockLogger) Warn(msg string, fields ...gozap.Field) {
+	m.t.Logf("WARN: %s %v", msg, fields)
+}
+
 func (m *mockLogger) Error(err error, msg string, fields ...gozap.Field) {
 	m.t.Logf("ERROR: %s: %v %v", msg, err, fields)
 }

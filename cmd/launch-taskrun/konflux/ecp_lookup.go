@@ -18,6 +18,7 @@ type ClientReader interface {
 // Logger interface for logging in the konflux package
 type Logger interface {
 	Info(msg string, fields ...gozap.Field)
+	Warn(msg string, fields ...gozap.Field)
 	Error(err error, msg string, fields ...gozap.Field)
 }
 
