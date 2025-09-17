@@ -154,7 +154,7 @@ The project includes comprehensive Make targets for development and deployment:
 - `make logs` - Show logs from the service
 
 ### Local Development
-- `make deploy-local` - Deploy to local development environment
+- `make deploy-local` - Smart deployment (auto-detects kind vs other clusters)
 - `make undeploy-local` - Remove local deployment
 - `make logs-local` - View local service logs
 - `make test-local` - Test with sample snapshot
@@ -175,11 +175,7 @@ The project includes comprehensive Make targets for development and deployment:
 
 * Make sure you have recent versions of `kn`, `kn-quickstart`, `ko`, `kind`, and `tkn` installed.
 * Run `make setup-knative`
-* Do `export KO_DOCKER_REPO=quay.io/yourquayuser`
-* Run `make build`
-* Go to <https://quay.io/> and configure the `quay.io/yourquayuser/launch-taskrun-*`
-  repo that was just created to be public instead of private.
-* Run `make deploy-local`
+* Run `make deploy-local` (automatically detects kind and uses optimized deployment)
 * Run `hack/demo.sh`
 
 ### Building
@@ -217,7 +213,7 @@ go run cmd/launch-taskrun/main.go
 
 ### 🎯 Quick References
 - **Development**: Use `make help` to see all available commands
-- **Local Testing**: Use `make deploy-local` and `make test-local` for development
+- **Local Testing**: Use `make deploy-local` (auto-detects environment) and `make test-local` for development
 - **Staging-like Testing**: Use `make deploy-staging-local` for realistic testing with infra-deployments config
 
 ## Container Images
