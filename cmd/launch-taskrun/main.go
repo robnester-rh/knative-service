@@ -426,10 +426,10 @@ func (s *Service) createTaskRun(snapshot *konflux.Snapshot, config *TaskRunConfi
 			Name:      fmt.Sprintf("verify-enterprise-contract-%s-%d", snapshot.Name, time.Now().Unix()),
 			Namespace: snapshot.Namespace,
 			Labels: map[string]string{
-				"app.kubernetes.io/name":       "conforma-knative-service",
+				"app.kubernetes.io/name":       "verify-and-create-vsa",
 				"app.kubernetes.io/instance":   snapshot.Name,
-				"app.kubernetes.io/component":  "taskrun",
-				"app.kubernetes.io/part-of":    "conforma",
+				"app.kubernetes.io/component":  "conforma",
+				"app.kubernetes.io/part-of":    "konflux",
 				"app.kubernetes.io/managed-by": "conforma-knative-service",
 			},
 		},
