@@ -13,7 +13,7 @@ The `make deploy-local` target automatically detects your environment and choose
 ## Prerequisites
 
 - [kind](https://kind.sigs.k8s.io/) installed
-- [ko](https://github.com/ko-build/ko) installed  
+- [ko](https://github.com/ko-build/ko) installed
 - [kn](https://knative.dev/docs/client/) with quickstart plugin
 - [kubectl](https://kubernetes.io/docs/tasks/tools/) installed
 - Docker daemon running
