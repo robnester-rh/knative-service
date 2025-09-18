@@ -293,7 +293,7 @@ jobs:
           --image-label="org.opencontainers.image.created=$BUILD_DATE" \
           --image-label="org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
           --image-label="org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}" \
-          --image-label="org.opencontainers.image.title=Conforma Verifier Listener" \
+          --image-label="org.opencontainers.image.title=Conforma Knative Service" \
           --image-label="org.opencontainers.image.description=Kubernetes-native event-driven service for enterprise contract verification" \
           ./cmd/launch-taskrun
         
@@ -313,7 +313,7 @@ jobs:
           git log --oneline $PREVIOUS_TAG..HEAD >> CHANGELOG.md
         else
           echo "## Initial Release" > CHANGELOG.md
-          echo "First release of Conforma Verifier Listener" >> CHANGELOG.md
+          echo "First release of Conforma Knative Service" >> CHANGELOG.md
         fi
         
         echo "changelog<<EOF" >> $GITHUB_OUTPUT
@@ -328,8 +328,8 @@ jobs:
         gh release create ${{ steps.version.outputs.version }} \
           --title "Release ${{ steps.version.outputs.version }}" \
           --notes-file - << 'EOF'
-        # Conforma Verifier Listener ${{ steps.version.outputs.version }}
-        
+        # Conforma Knative Service ${{ steps.version.outputs.version }}
+
         ## 🚀 Container Images
         - **Latest**: \`${{ env.QUAY_REPOSITORY }}:${{ steps.version.outputs.version }}\`
         - **Commit-specific**: \`${{ env.QUAY_REPOSITORY }}:${{ steps.version.outputs.version }}-${{ steps.version.outputs.short_sha }}\`
