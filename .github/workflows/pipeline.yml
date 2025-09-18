@@ -340,7 +340,7 @@ jobs:
         Update your kustomization to use the release image:
         \`\`\`yaml
         images:
-        - name: ko://github.com/conforma/conforma-verifier-listener/cmd/launch-taskrun
+        - name: ko://github.com/conforma/knative-service/cmd/launch-taskrun
           newName: ${{ env.QUAY_REPOSITORY }}
           newTag: ${{ steps.version.outputs.version }}
         \`\`\`

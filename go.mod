@@ -1,4 +1,4 @@
-module github.com/conforma/conforma-verifier-listener
+module github.com/conforma/knative-service
 
 go 1.24.0
 

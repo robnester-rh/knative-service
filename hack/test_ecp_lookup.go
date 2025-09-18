@@ -26,8 +26,8 @@ import (
 	gozap "go.uber.org/zap"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/conforma/conforma-verifier-listener/cmd/launch-taskrun/k8s"
-	"github.com/conforma/conforma-verifier-listener/cmd/launch-taskrun/konflux"
+	"github.com/conforma/knative-service/cmd/launch-taskrun/k8s"
+	"github.com/conforma/knative-service/cmd/launch-taskrun/konflux"
 )
 
 // zapLogger wraps a zap logger to implement our Logger interface

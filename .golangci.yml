@@ -23,7 +23,7 @@ linters-settings:
   lll:
     line-length: 140
   goimports:
-    local-prefixes: github.com/conforma/conforma-verifier-listener
+    local-prefixes: github.com/conforma/knative-service
   gocritic:
     enabled-tags:
       - diagnostic

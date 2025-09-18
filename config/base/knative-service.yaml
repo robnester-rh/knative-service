@@ -7,4 +7,4 @@ spec:
     spec:
       serviceAccountName: conforma-verifier-listener
       containers:
-        - image: ko://github.com/conforma/conforma-verifier-listener/cmd/launch-taskrun
+        - image: ko://github.com/conforma/knative-service/cmd/launch-taskrun
