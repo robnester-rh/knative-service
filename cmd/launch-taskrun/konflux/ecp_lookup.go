@@ -62,12 +62,22 @@ func FindReleasePlan(ctx context.Context, cli ClientReader, logger Logger, appNa
 	return rp, nil
 }
 
+// Two methods to extract the information we need from the ReleasePlan
+func (rp *ReleasePlan) RpaNamespace() string {
+	// Usually "rhtap-releng-tenant"
+	return rp.Spec.Target
+}
+
+func (rp *ReleasePlan) RpaName() string {
+	return rp.Labels["release.appstudio.openshift.io/releasePlanAdmission"]
+}
+
 func FindReleasePlanAdmission(ctx context.Context, cli ClientReader, logger Logger, rp ReleasePlan) (ReleasePlanAdmission, error) {
 	// The RP points to a one specific RPA. Look it up using the target and a label value:
 	var rpa ReleasePlanAdmission
 	rpaKey := client.ObjectKey{
-		Namespace: rp.Spec.Target, // usually "rhtap-releng-tenant"
-		Name:      rp.Labels["release.appstudio.openshift.io/releasePlanAdmission"],
+		Namespace: rp.RpaNamespace(),
+		Name:      rp.RpaName(),
 	}
 	err := cli.Get(ctx, rpaKey, &rpa)
 	if err != nil {
