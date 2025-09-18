@@ -148,7 +148,11 @@ status: ## Show deployment status
 .PHONY: test
 test: ## Run tests
 	@echo "Running tests..."
-	cd cmd/launch-taskrun && go test -v
+	cd cmd/launch-taskrun && go test ./... -v
+
+.PHONY: quiet-test
+quiet-test: ## Run tests without -v
+	@cd cmd/launch-taskrun && go test ./...
 
 .PHONY: test-coverage
 test-coverage: ## Run tests with coverage

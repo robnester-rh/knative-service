@@ -14,6 +14,9 @@ import (
 	"go.uber.org/zap/zaptest"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/conforma/conforma-verifier-listener/cmd/launch-taskrun/konflux"
 )
 
 // --- Mock implementations ---
@@ -58,6 +61,20 @@ func (m *mockTektonTaskRunCreator) Create(ctx context.Context, taskRun *tektonv1
 // 	m.Called(append([]interface{}{format}, args...)...)
 // }
 
+type mockControllerRuntimeClient struct {
+	mock.Mock
+}
+
+func (m *mockControllerRuntimeClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	args := m.Called(ctx, key, obj, opts)
+	return args.Error(0)
+}
+
+func (m *mockControllerRuntimeClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	args := m.Called(ctx, list, opts)
+	return args.Error(0)
+}
+
 type mockCloudEventsClient struct {
 	mock.Mock
 }
@@ -71,12 +88,14 @@ func TestHandleCloudEvent_ValidSnapshot(t *testing.T) {
 	// Setup mocks
 	mockK8s := &mockK8sClient{}
 	mockTekton := &mockTektonClient{}
+	mockCrtlClient := &mockControllerRuntimeClient{}
 	zaplog := &zapLogger{l: zaptest.NewLogger(t)}
 
-	service := NewServiceWithDependencies(mockK8s, mockTekton, zaplog, ServiceConfig{})
+	service := NewServiceWithDependencies(mockK8s, mockTekton, mockCrtlClient, zaplog, ServiceConfig{})
 
 	// Create test data
 	snapshotSpec := map[string]interface{}{
+		"application": "test-application",
 		"components": []map[string]interface{}{
 			{"name": "test-component", "containerImage": "test-image:latest"},
 		},
@@ -119,6 +138,9 @@ func TestHandleCloudEvent_ValidSnapshot(t *testing.T) {
 	mockCoreV1.On("ConfigMaps", "test-namespace").Return(mockConfigMapGetter)
 	mockK8s.On("CoreV1").Return(mockCoreV1)
 
+	// Setup ECP lookup mocks - return empty lists to trigger fallback to config
+	mockCrtlClient.On("List", mock.Anything, mock.AnythingOfType("*konflux.ReleasePlanList"), mock.Anything).Return(fmt.Errorf("no release plans found"))
+
 	expectedTaskRun := &tektonv1.TaskRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "verify-enterprise-contract-test-snapshot-1234567890",
@@ -145,9 +167,10 @@ func TestHandleCloudEvent_ValidSnapshot(t *testing.T) {
 func TestHandleCloudEvent_InvalidResource(t *testing.T) {
 	mockK8s := &mockK8sClient{}
 	mockTekton := &mockTektonClient{}
+	mockCrtlClient := &mockControllerRuntimeClient{}
 	zaplog := &zapLogger{l: zaptest.NewLogger(t)}
 
-	service := NewServiceWithDependencies(mockK8s, mockTekton, zaplog, ServiceConfig{})
+	service := NewServiceWithDependencies(mockK8s, mockTekton, mockCrtlClient, zaplog, ServiceConfig{})
 
 	eventData := CloudEventData{
 		APIVersion: "appstudio.redhat.com/v1alpha1",
@@ -171,9 +194,10 @@ func TestHandleCloudEvent_InvalidResource(t *testing.T) {
 func TestReadConfigMap_Success(t *testing.T) {
 	mockK8s := &mockK8sClient{}
 	mockTekton := &mockTektonClient{}
+	mockCrtlClient := &mockControllerRuntimeClient{}
 	zaplog := &zapLogger{l: zaptest.NewLogger(t)}
 
-	service := NewServiceWithDependencies(mockK8s, mockTekton, zaplog, ServiceConfig{})
+	service := NewServiceWithDependencies(mockK8s, mockTekton, mockCrtlClient, zaplog, ServiceConfig{})
 
 	expectedConfigMap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{Name: "taskrun-config"},
@@ -214,10 +238,11 @@ func TestReadConfigMap_Success(t *testing.T) {
 func TestReadConfigMap_CacheExpiry(t *testing.T) {
 	mockK8s := &mockK8sClient{}
 	mockTekton := &mockTektonClient{}
+	mockCrtlClient := &mockControllerRuntimeClient{}
 	zaplog := &zapLogger{l: zaptest.NewLogger(t)}
 
 	// Create service with very short TTL for testing
-	service := NewServiceWithDependencies(mockK8s, mockTekton, zaplog, ServiceConfig{
+	service := NewServiceWithDependencies(mockK8s, mockTekton, mockCrtlClient, zaplog, ServiceConfig{
 		CacheTTL: 1 * time.Millisecond,
 	})
 
@@ -255,9 +280,10 @@ func TestReadConfigMap_CacheExpiry(t *testing.T) {
 func TestReadConfigMap_Error(t *testing.T) {
 	mockK8s := &mockK8sClient{}
 	mockTekton := &mockTektonClient{}
+	mockCrtlClient := &mockControllerRuntimeClient{}
 	zaplog := &zapLogger{l: zaptest.NewLogger(t)}
 
-	service := NewServiceWithDependencies(mockK8s, mockTekton, zaplog, ServiceConfig{})
+	service := NewServiceWithDependencies(mockK8s, mockTekton, mockCrtlClient, zaplog, ServiceConfig{})
 
 	mockConfigMapGetter := &mockK8sConfigMapGetter{}
 	mockConfigMapGetter.On("Get", mock.Anything, "taskrun-config", metav1.GetOptions{}).Return((*corev1.ConfigMap)(nil), fmt.Errorf("configmap not found"))
@@ -276,16 +302,17 @@ func TestReadConfigMap_Error(t *testing.T) {
 func TestCreateTaskRun_Success(t *testing.T) {
 	mockK8s := &mockK8sClient{}
 	mockTekton := &mockTektonClient{}
+	mockCrtlClient := &mockControllerRuntimeClient{}
 	zaplog := &zapLogger{l: zaptest.NewLogger(t)}
 
-	service := NewServiceWithDependencies(mockK8s, mockTekton, zaplog, ServiceConfig{})
+	service := NewServiceWithDependencies(mockK8s, mockTekton, mockCrtlClient, zaplog, ServiceConfig{})
 
-	snapshot := &Snapshot{
+	snapshot := &konflux.Snapshot{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-snapshot",
 			Namespace: "test-namespace",
 		},
-		Spec: json.RawMessage(`{"components":[{"name":"test-component","containerImage":"test-image:latest"}]}`),
+		Spec: json.RawMessage(`{"application":"test-app","components":[{"name":"test-component","containerImage":"test-image:latest"}]}`),
 	}
 
 	config := &TaskRunConfig{
@@ -293,6 +320,9 @@ func TestCreateTaskRun_Success(t *testing.T) {
 		PublicKey:           "test-key",
 		RekorHost:           "test-rekor",
 	}
+
+	// Setup ECP lookup mocks - return error to trigger fallback to config
+	mockCrtlClient.On("List", mock.Anything, mock.AnythingOfType("*konflux.ReleasePlanList"), mock.Anything).Return(fmt.Errorf("no release plans found"))
 
 	taskRun, err := service.createTaskRun(snapshot, config)
 
@@ -323,17 +353,19 @@ func TestCreateTaskRun_Success(t *testing.T) {
 	assert.Equal(t, "true", params["INFO"])
 	assert.Equal(t, "true", params["show-successes"])
 	assert.Equal(t, "1", params["WORKERS"])
+	assert.Contains(t, params["IMAGES"], "test-app")
 	assert.Contains(t, params["IMAGES"], "test-component")
 }
 
 func TestCreateTaskRun_InvalidSpec(t *testing.T) {
 	mockK8s := &mockK8sClient{}
 	mockTekton := &mockTektonClient{}
+	mockCrtlClient := &mockControllerRuntimeClient{}
 	zaplog := &zapLogger{l: zaptest.NewLogger(t)}
 
-	service := NewServiceWithDependencies(mockK8s, mockTekton, zaplog, ServiceConfig{})
+	service := NewServiceWithDependencies(mockK8s, mockTekton, mockCrtlClient, zaplog, ServiceConfig{})
 
-	snapshot := &Snapshot{
+	snapshot := &konflux.Snapshot{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-snapshot",
 			Namespace: "test-namespace",
@@ -355,16 +387,17 @@ func TestCreateTaskRun_InvalidSpec(t *testing.T) {
 func TestProcessSnapshot_Success(t *testing.T) {
 	mockK8s := &mockK8sClient{}
 	mockTekton := &mockTektonClient{}
+	mockCrtlClient := &mockControllerRuntimeClient{}
 	zaplog := &zapLogger{l: zaptest.NewLogger(t)}
 
-	service := NewServiceWithDependencies(mockK8s, mockTekton, zaplog, ServiceConfig{})
+	service := NewServiceWithDependencies(mockK8s, mockTekton, mockCrtlClient, zaplog, ServiceConfig{})
 
-	snapshot := &Snapshot{
+	snapshot := &konflux.Snapshot{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-snapshot",
 			Namespace: "test-namespace",
 		},
-		Spec: json.RawMessage(`{"components":[{"name":"test-component","containerImage":"test-image:latest"}]}`),
+		Spec: json.RawMessage(`{"application":"test-application","components":[{"name":"test-component","containerImage":"test-image:latest"}]}`),
 	}
 
 	// Setup configmap mock
@@ -382,6 +415,9 @@ func TestProcessSnapshot_Success(t *testing.T) {
 	mockCoreV1 := &mockK8sCoreV1{}
 	mockCoreV1.On("ConfigMaps", "test-namespace").Return(mockConfigMapGetter)
 	mockK8s.On("CoreV1").Return(mockCoreV1)
+
+	// Setup ECP lookup mocks - return error to trigger fallback to config
+	mockCrtlClient.On("List", mock.Anything, mock.AnythingOfType("*konflux.ReleasePlanList"), mock.Anything).Return(fmt.Errorf("no release plans found"))
 
 	// Setup taskrun creation mock
 	expectedTaskRun := &tektonv1.TaskRun{
@@ -408,16 +444,17 @@ func TestProcessSnapshot_Success(t *testing.T) {
 func TestProcessSnapshot_ConfigMapError(t *testing.T) {
 	mockK8s := &mockK8sClient{}
 	mockTekton := &mockTektonClient{}
+	mockCrtlClient := &mockControllerRuntimeClient{}
 	zaplog := &zapLogger{l: zaptest.NewLogger(t)}
 
-	service := NewServiceWithDependencies(mockK8s, mockTekton, zaplog, ServiceConfig{})
+	service := NewServiceWithDependencies(mockK8s, mockTekton, mockCrtlClient, zaplog, ServiceConfig{})
 
-	snapshot := &Snapshot{
+	snapshot := &konflux.Snapshot{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-snapshot",
 			Namespace: "test-namespace",
 		},
-		Spec: json.RawMessage(`{"components":[{"name":"test-component","containerImage":"test-image:latest"}]}`),
+		Spec: json.RawMessage(`{"application":"test-application","components":[{"name":"test-component","containerImage":"test-image:latest"}]}`),
 	}
 
 	// Setup configmap error
@@ -439,16 +476,17 @@ func TestProcessSnapshot_ConfigMapError(t *testing.T) {
 func TestProcessSnapshot_TaskRunCreationError(t *testing.T) {
 	mockK8s := &mockK8sClient{}
 	mockTekton := &mockTektonClient{}
+	mockCrtlClient := &mockControllerRuntimeClient{}
 	zaplog := &zapLogger{l: zaptest.NewLogger(t)}
 
-	service := NewServiceWithDependencies(mockK8s, mockTekton, zaplog, ServiceConfig{})
+	service := NewServiceWithDependencies(mockK8s, mockTekton, mockCrtlClient, zaplog, ServiceConfig{})
 
-	snapshot := &Snapshot{
+	snapshot := &konflux.Snapshot{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-snapshot",
 			Namespace: "test-namespace",
 		},
-		Spec: json.RawMessage(`{"components":[{"name":"test-component","containerImage":"test-image:latest"}]}`),
+		Spec: json.RawMessage(`{"application":"test-application","components":[{"name":"test-component","containerImage":"test-image:latest"}]}`),
 	}
 
 	// Setup configmap mock
@@ -465,6 +503,9 @@ func TestProcessSnapshot_TaskRunCreationError(t *testing.T) {
 	mockCoreV1 := &mockK8sCoreV1{}
 	mockCoreV1.On("ConfigMaps", "test-namespace").Return(mockConfigMapGetter)
 	mockK8s.On("CoreV1").Return(mockCoreV1)
+
+	// Setup ECP lookup mocks - return error to trigger fallback to config
+	mockCrtlClient.On("List", mock.Anything, mock.AnythingOfType("*konflux.ReleasePlanList"), mock.Anything).Return(fmt.Errorf("no release plans found"))
 
 	// Setup taskrun creation error
 	mockTaskRunCreator := &mockTektonTaskRunCreator{}
@@ -486,7 +527,7 @@ func TestNewServiceWithDependencies(t *testing.T) {
 	mockTekton := &mockTektonClient{}
 	zaplog := &zapLogger{l: zaptest.NewLogger(t)}
 
-	service := NewServiceWithDependencies(mockK8s, mockTekton, zaplog, ServiceConfig{ConfigMapName: "custom-config"})
+	service := NewServiceWithDependencies(mockK8s, mockTekton, nil, zaplog, ServiceConfig{ConfigMapName: "custom-config"})
 
 	assert.Equal(t, mockK8s, service.k8sClient)
 	assert.Equal(t, mockTekton, service.tektonClient)
@@ -497,9 +538,10 @@ func TestNewServiceWithDependencies(t *testing.T) {
 func TestNewServiceWithDependencies_DefaultConfigMapName(t *testing.T) {
 	mockK8s := &mockK8sClient{}
 	mockTekton := &mockTektonClient{}
+	mockCrtlClient := &mockControllerRuntimeClient{}
 	zaplog := &zapLogger{l: zaptest.NewLogger(t)}
 
-	service := NewServiceWithDependencies(mockK8s, mockTekton, zaplog, ServiceConfig{})
+	service := NewServiceWithDependencies(mockK8s, mockTekton, mockCrtlClient, zaplog, ServiceConfig{})
 
 	assert.Equal(t, "taskrun-config", service.configMapName)
 }
@@ -507,10 +549,11 @@ func TestNewServiceWithDependencies_DefaultConfigMapName(t *testing.T) {
 func TestServer_Start(t *testing.T) {
 	mockK8s := &mockK8sClient{}
 	mockTekton := &mockTektonClient{}
+	mockCrtlClient := &mockControllerRuntimeClient{}
 	zaplog := &zapLogger{l: zaptest.NewLogger(t)}
 	ceClient := &mockCloudEventsClient{}
 
-	service := NewServiceWithDependencies(mockK8s, mockTekton, zaplog, ServiceConfig{})
+	service := NewServiceWithDependencies(mockK8s, mockTekton, mockCrtlClient, zaplog, ServiceConfig{})
 	server := NewServer(service, "8080", ceClient)
 
 	// Test that server can be created (we can't easily test the actual HTTP server in unit tests)
@@ -520,8 +563,13 @@ func TestServer_Start(t *testing.T) {
 }
 
 func TestServer_Start_UsesCloudEventsClient(t *testing.T) {
-	service := NewServiceWithDependencies(&mockK8sClient{}, &mockTektonClient{}, &zapLogger{l: zaptest.NewLogger(t)}, ServiceConfig{})
+	mockK8s := &mockK8sClient{}
+	mockTekton := &mockTektonClient{}
+	mockCrtlClient := &mockControllerRuntimeClient{}
+	zaplog := &zapLogger{l: zaptest.NewLogger(t)}
 	ceClient := &mockCloudEventsClient{}
+
+	service := NewServiceWithDependencies(mockK8s, mockTekton, mockCrtlClient, zaplog, ServiceConfig{})
 	server := NewServer(service, "8080", ceClient)
 
 	ceClient.On("StartReceiver", mock.Anything, mock.Anything).Return(nil).Once()

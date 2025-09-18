@@ -20,10 +20,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	coretypedv1 "k8s.io/client-go/kubernetes/typed/core/v1"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 
 	gozap "go.uber.org/zap"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/conforma/conforma-verifier-listener/cmd/launch-taskrun/k8s"
+	"github.com/conforma/conforma-verifier-listener/cmd/launch-taskrun/konflux"
 )
 
 // --- Interfaces for testability ---
@@ -51,9 +53,15 @@ type TektonClient interface {
 	TektonV1() TektonV1
 }
 
+type ControllerRuntimeClient interface {
+	Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error
+	List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error
+}
+
 // --- Logger interface and zapLogger ---
 type Logger interface {
 	Info(msg string, fields ...gozap.Field)
+	Warn(msg string, fields ...gozap.Field)
 	Error(err error, msg string, fields ...gozap.Field)
 }
 
@@ -62,6 +70,7 @@ type zapLogger struct {
 }
 
 func (z *zapLogger) Info(msg string, fields ...gozap.Field) { z.l.Info(msg, fields...) }
+func (z *zapLogger) Warn(msg string, fields ...gozap.Field) { z.l.Warn(msg, fields...) }
 func (z *zapLogger) Error(err error, msg string, fields ...gozap.Field) {
 	z.l.Error(msg, append(fields, gozap.Error(err))...)
 }
@@ -171,12 +180,19 @@ func (r *realCloudEventsClient) StartReceiver(ctx context.Context, fn interface{
 	return r.client.StartReceiver(ctx, fn)
 }
 
-// --- Service and business logic ---
-type Snapshot struct {
-	metav1.TypeMeta   `json:",inline"`
-	metav1.ObjectMeta `json:"metadata,omitempty"`
-	Spec              json.RawMessage `json:"spec,omitempty"`
+type realControllerRuntimeClient struct {
+	client client.Client
 }
+
+func (r *realControllerRuntimeClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+	return r.client.Get(ctx, key, obj, opts...)
+}
+
+func (r *realControllerRuntimeClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	return r.client.List(ctx, list, opts...)
+}
+
+// --- Service and business logic ---
 
 type CloudEventData struct {
 	APIVersion string `json:"apiVersion"`
@@ -208,6 +224,7 @@ type TaskRunConfig struct {
 type Service struct {
 	k8sClient     K8sClient
 	tektonClient  TektonClient
+	crtlClient    ControllerRuntimeClient
 	logger        Logger
 	configMapName string
 	configCache   *configMapCache
@@ -218,7 +235,7 @@ type ServiceConfig struct {
 	CacheTTL      time.Duration
 }
 
-func NewServiceWithDependencies(k8s K8sClient, tekton TektonClient, logger Logger, config ServiceConfig) *Service {
+func NewServiceWithDependencies(k8s K8sClient, tekton TektonClient, crtlClient ControllerRuntimeClient, logger Logger, config ServiceConfig) *Service {
 	if config.ConfigMapName == "" {
 		config.ConfigMapName = "taskrun-config"
 	}
@@ -228,6 +245,7 @@ func NewServiceWithDependencies(k8s K8sClient, tekton TektonClient, logger Logge
 	return &Service{
 		k8sClient:     k8s,
 		tektonClient:  tekton,
+		crtlClient:    crtlClient,
 		logger:        logger,
 		configMapName: config.ConfigMapName,
 		configCache:   newConfigMapCache(config.CacheTTL),
@@ -235,18 +253,9 @@ func NewServiceWithDependencies(k8s K8sClient, tekton TektonClient, logger Logge
 }
 
 func NewService(config ServiceConfig) (*Service, error) {
-	var k8sConfig *rest.Config
-	var err error
-	k8sConfig, err = rest.InClusterConfig()
+	k8sConfig, err := k8s.NewK8sConfig()
 	if err != nil {
-		kubeconfig := os.Getenv("KUBECONFIG")
-		if kubeconfig == "" {
-			kubeconfig = os.Getenv("HOME") + "/.kube/config"
-		}
-		k8sConfig, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get kubeconfig: %w", err)
-		}
+		return nil, err
 	}
 	k8sClient, err := kubernetes.NewForConfig(k8sConfig)
 	if err != nil {
@@ -256,9 +265,14 @@ func NewService(config ServiceConfig) (*Service, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create tekton client: %w", err)
 	}
+	crtlClient, err := k8s.NewControllerRuntimeClient()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create controller-runtime client: %w", err)
+	}
 	return NewServiceWithDependencies(
 		&realK8sClient{client: k8sClient},
 		&realTektonClient{client: tektonClient},
+		&realControllerRuntimeClient{client: crtlClient},
 		&zapLogger{l: gozap.NewExample()},
 		config,
 	), nil
@@ -275,17 +289,18 @@ func (s *Service) handleCloudEvent(ctx context.Context, event cloudevents.Event)
 		return nil
 	}
 	s.logger.Info("Processing Snapshot", gozap.String("name", eventData.Metadata.Name), gozap.String("namespace", eventData.Metadata.Namespace))
-	snapshot := &Snapshot{
+	snapshot := &konflux.Snapshot{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      eventData.Metadata.Name,
 			Namespace: eventData.Metadata.Namespace,
 		},
-		Spec: eventData.Spec,
 	}
+	// Assign the raw spec data directly
+	snapshot.Spec = eventData.Spec
 	return s.processSnapshot(ctx, snapshot)
 }
 
-func (s *Service) processSnapshot(ctx context.Context, snapshot *Snapshot) error {
+func (s *Service) processSnapshot(ctx context.Context, snapshot *konflux.Snapshot) error {
 	s.logger.Info("Starting to process snapshot", gozap.String("name", snapshot.Name), gozap.String("namespace", snapshot.Namespace))
 
 	config, err := s.readConfigMap(ctx, snapshot.Namespace)
@@ -345,13 +360,23 @@ func (s *Service) readConfigMap(ctx context.Context, namespace string) (*TaskRun
 	return config, nil
 }
 
-func (s *Service) createTaskRun(snapshot *Snapshot, config *TaskRunConfig) (*tektonv1.TaskRun, error) {
-	specJSON, err := json.Marshal(snapshot.Spec)
-	// log the specJSON
-	s.logger.Info("SpecJSON", gozap.String("specJSON", string(specJSON)))
-	if err != nil {
+func (s *Service) findEcp(snapshot *konflux.Snapshot) (string, error) {
+	ctx := context.Background()
+	return konflux.FindEnterpriseContractPolicy(ctx, s.crtlClient, s.logger, snapshot)
+}
+
+func (s *Service) createTaskRun(snapshot *konflux.Snapshot, config *TaskRunConfig) (*tektonv1.TaskRun, error) {
+	// Use the raw JSON spec directly
+	specJSON := snapshot.Spec
+
+	// It seems unlikely we'll get invalid json but let's be defensive
+	var validationTarget interface{}
+	if err := json.Unmarshal(specJSON, &validationTarget); err != nil {
 		return nil, fmt.Errorf("failed to marshal snapshot spec: %w", err)
 	}
+
+	// log the specJSON
+	s.logger.Info("SpecJSON", gozap.String("specJSON", string(specJSON)))
 	// Helper function to create ParamValue with validation
 	createParamValue := func(value string) tektonv1.ParamValue {
 		if value == "" {
@@ -360,8 +385,19 @@ func (s *Service) createTaskRun(snapshot *Snapshot, config *TaskRunConfig) (*tek
 		return tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: value}
 	}
 
+	ecp, err := s.findEcp(snapshot)
+	if err != nil {
+		// Fall back to the default
+		// TODO: We might reconsider the value in generating the VSA in this
+		// scenario. Perhaps it's better to bail out and do nothing.
+		ecp = config.PolicyConfiguration
+		s.logger.Info("Unable to find RPA in cluster. Falling back to default.", gozap.Error(err))
+	} else {
+		s.logger.Info("Found RPA in cluster. Using correct ECP.")
+	}
+
 	params := []tektonv1.Param{
-		{Name: "POLICY_CONFIGURATION", Value: createParamValue(config.PolicyConfiguration)},
+		{Name: "POLICY_CONFIGURATION", Value: createParamValue(ecp)},
 		{Name: "PUBLIC_KEY", Value: createParamValue(config.PublicKey)},
 		{Name: "IGNORE_REKOR", Value: createParamValue(config.IgnoreRekor)},
 		{Name: "STRICT", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "true"}},
