@@ -15,8 +15,14 @@ NAMESPACE=rhtap-contract-tenant
 SNAPSHOT=$(oc get snapshot -n $NAMESPACE \
   --sort-by=.metadata.creationTimestamp --no-headers \
   --output=custom-columns="NAME:.metadata.name" |
-  grep ^ec-v |
+  (grep ^ec-v || true) |
   tail -1)
 
-# Use the test go program to look up the ECP for that snapshot
-go run hack/test_ecp_lookup.go $SNAPSHOT $NAMESPACE
+if [ -z "$SNAPSHOT" ]; then
+  echo "Snapshot not found. Maybe you need to login here:"
+  echo "  https://oauth-openshift.apps.stone-prd-rh01.pg1f.p1.openshiftapps.com/oauth/token/request"
+  exit 1
+else
+  # Use the test go program to look up the ECP for that snapshot
+  go run hack/test_ecp_lookup.go $SNAPSHOT $NAMESPACE
+fi
