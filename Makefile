@@ -43,8 +43,8 @@ deploy-with-knative-setup: setup-knative deploy-local ## Setup Knative and deplo
 
 .PHONY: logs
 logs: ## Show logs from the service
-	@echo "Showing logs from conforma-verifier-listener..."
-	kubectl logs -n $(NAMESPACE) -l serving.knative.dev/service=conforma-verifier-listener --tail=100 -f
+	@echo "Showing logs from conforma-knative-service..."
+	kubectl logs -n $(NAMESPACE) -l serving.knative.dev/service=conforma-knative-service --tail=100 -f
 
 .PHONY: deploy-local
 deploy-local: check-knative ## Deploy the service to local development environment
@@ -59,26 +59,26 @@ deploy-local: check-knative ## Deploy the service to local development environme
 		echo "🚀 Deploying to cluster..."; \
 		export KO_DOCKER_REPO=ko.local && kustomize build config/dev/ | KO_DOCKER_REPO=$$KO_DOCKER_REPO ko resolve -f - | kubectl apply -f -; \
 		echo "⏳ Waiting for pods to be ready..."; \
-		hack/wait-for-ready-pod.sh serving.knative.dev/configuration=conforma-verifier-listener $(NAMESPACE); \
+		hack/wait-for-ready-pod.sh serving.knative.dev/configuration=conforma-knative-service $(NAMESPACE); \
 	else \
 		echo "🌐 Using registry-based deployment for non-kind cluster..."; \
 		echo "Using KO_DOCKER_REPO: $(KO_DOCKER_REPO)"; \
 		kustomize build config/dev/ | KO_DOCKER_REPO=$(KO_DOCKER_REPO) ko apply --bare -f -; \
 		echo "⏳ Waiting for pods to be ready..."; \
 		hack/wait-for-ready-pod.sh eventing.knative.dev/sourceName=snapshot-events $(NAMESPACE); \
-		hack/wait-for-ready-pod.sh serving.knative.dev/configuration=conforma-verifier-listener $(NAMESPACE); \
+		hack/wait-for-ready-pod.sh serving.knative.dev/configuration=conforma-knative-service $(NAMESPACE); \
 	fi
 	@echo "✅ Deployment complete!"
 	@echo "Service URL:"
-	@kubectl get ksvc conforma-verifier-listener -n $(NAMESPACE) -o jsonpath='{.status.url}' && echo
+	@kubectl get ksvc conforma-knative-service -n $(NAMESPACE) -o jsonpath='{.status.url}' && echo
 
 .PHONY: deploy-staging-local
 deploy-staging-local: check-knative ## Deploy locally using infra-deployments staging configuration
-	@echo "Deploying conforma-verifier-listener using infra-deployments staging config..."
+	@echo "Deploying conforma-knative-service using infra-deployments staging config..."
 	@echo "Using KO_DOCKER_REPO: $(KO_DOCKER_REPO)"
 	@echo "Fetching staging configuration from infra-deployments..."
 	@trap 'rm -rf /tmp/staging-remote /tmp/staging-kustomization.yaml /tmp/fallback-staging' EXIT; \
-	if curl -s https://raw.githubusercontent.com/redhat-appstudio/infra-deployments/main/components/conforma-verifier-listener/staging/kustomization.yaml > /tmp/staging-kustomization.yaml 2>/dev/null && [ -s /tmp/staging-kustomization.yaml ] && ! grep -q "404" /tmp/staging-kustomization.yaml; then \
+	if curl -s https://raw.githubusercontent.com/redhat-appstudio/infra-deployments/main/components/conforma-knative-service/staging/kustomization.yaml > /tmp/staging-kustomization.yaml 2>/dev/null && [ -s /tmp/staging-kustomization.yaml ] && ! grep -q "404" /tmp/staging-kustomization.yaml; then \
 		echo "✅ Found infra-deployments staging config"; \
 		mkdir -p /tmp/staging-remote; \
 		sed 's/namespace: .*/namespace: conforma-local/' /tmp/staging-kustomization.yaml > /tmp/staging-remote/kustomization.yaml; \
@@ -99,30 +99,30 @@ deploy-staging-local: check-knative ## Deploy locally using infra-deployments st
 	fi
 	@echo "Staging-local deployment complete!"
 	@echo "Service URL:"
-	@kubectl get ksvc conforma-verifier-listener -n conforma-local -o jsonpath='{.status.url}' && echo
+	@kubectl get ksvc conforma-knative-service -n conforma-local -o jsonpath='{.status.url}' && echo
 
 .PHONY: undeploy-local
 undeploy-local: ## Remove the local deployment
-	@echo "Removing conforma-verifier-listener..."
+	@echo "Removing conforma-knative-service..."
 	kustomize build config/dev/ | ko delete --ignore-not-found -f -
 	@echo "Undeployment complete!"
 
 .PHONY: logs-local
 logs-local: ## Show logs from the local service
-	@echo "Showing logs from conforma-verifier-listener..."
-	kubectl logs -n $(NAMESPACE) -l serving.knative.dev/service=conforma-verifier-listener --tail=100 -f
+	@echo "Showing logs from conforma-knative-service..."
+	kubectl logs -n $(NAMESPACE) -l serving.knative.dev/service=conforma-knative-service --tail=100 -f
 
 .PHONY: undeploy-staging-local
 undeploy-staging-local: ## Remove the staging-local deployment
-	@echo "Removing conforma-verifier-listener from staging-local environment..."
+	@echo "Removing conforma-knative-service from staging-local environment..."
 	kubectl delete namespace conforma-local --ignore-not-found
 	@echo "Staging-local undeployment complete!"
 
 
 .PHONY: logs-staging-local
 logs-staging-local: ## Show logs from the staging-local service
-	@echo "Showing logs from conforma-verifier-listener in staging-local environment..."
-	kubectl logs -n conforma-local -l serving.knative.dev/service=conforma-verifier-listener --tail=100 -f
+	@echo "Showing logs from conforma-knative-service in staging-local environment..."
+	kubectl logs -n conforma-local -l serving.knative.dev/service=conforma-knative-service --tail=100 -f
 
 .PHONY: test-local
 test-local: ## Test local deployment with a sample snapshot
@@ -134,10 +134,10 @@ test-local: ## Test local deployment with a sample snapshot
 .PHONY: status
 status: ## Show deployment status
 	@echo "Deployment status:"
-	kubectl get all -l app=conforma-verifier-listener -n $(NAMESPACE)
+	kubectl get all -l app=conforma-knative-service -n $(NAMESPACE)
 	@echo ""
 	@echo "Knative Service status:"
-	kubectl get ksvc conforma-verifier-listener -n $(NAMESPACE) || echo "Knative Service not found"
+	kubectl get ksvc conforma-knative-service -n $(NAMESPACE) || echo "Knative Service not found"
 	@echo ""
 	@echo "Event sources:"
 	kubectl get apiserversource -n $(NAMESPACE)

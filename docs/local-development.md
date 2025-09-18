@@ -100,7 +100,7 @@ If `ko build` fails:
 
 If pods don't become ready:
 - Check events: `kubectl get events -n default --sort-by='.lastTimestamp'`
-- Check pod logs: `kubectl logs -l serving.knative.dev/service=conforma-verifier-listener -n default`
+- Check pod logs: `kubectl logs -l serving.knative.dev/service=conforma-knative-service -n default`
 - Verify Knative is installed: `make check-knative`
 
 ## Development Workflow

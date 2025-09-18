@@ -426,11 +426,11 @@ func (s *Service) createTaskRun(snapshot *konflux.Snapshot, config *TaskRunConfi
 			Name:      fmt.Sprintf("verify-enterprise-contract-%s-%d", snapshot.Name, time.Now().Unix()),
 			Namespace: snapshot.Namespace,
 			Labels: map[string]string{
-				"app.kubernetes.io/name":       "conforma-verifier-listener",
+				"app.kubernetes.io/name":       "conforma-knative-service",
 				"app.kubernetes.io/instance":   snapshot.Name,
 				"app.kubernetes.io/component":  "taskrun",
-				"app.kubernetes.io/part-of":    "conforma-verifier",
-				"app.kubernetes.io/managed-by": "conforma-verifier-listener",
+				"app.kubernetes.io/part-of":    "conforma",
+				"app.kubernetes.io/managed-by": "conforma-knative-service",
 			},
 		},
 		Spec: tektonv1.TaskRunSpec{
