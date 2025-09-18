@@ -1,4 +1,4 @@
-# golangci-lint configuration for Conforma Verifier Listener
+# golangci-lint configuration
 run:
   timeout: 5m
   modules-download-mode: readonly
@@ -61,9 +61,9 @@ issues:
     - path: cmd/
       linters:
         - gochecknoinits
-  
+
   # Maximum issues count per one linter. Set to 0 to disable the limit.
   max-issues-per-linter: 0
-  
+
   # Maximum count of issues with the same text. Set to 0 to disable the limit.
   max-same-issues: 0
