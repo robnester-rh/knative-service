@@ -7,13 +7,13 @@ kubectl delete --ignore-not-found -f test-snapshot.yaml
 echo "* Creating new snapshot..."
 kubectl create -f test-snapshot.yaml
 
-echo "* Waiting for listener pod"
-until kubectl get pod -l serving.knative.dev/service=conforma-verifier-listener -n default &>/dev/null; do sleep 1; done
-kubectl wait --for=condition=Ready pod -l serving.knative.dev/service=conforma-verifier-listener -n default --timeout=30s
+echo "* Waiting for pod"
+until kubectl get pod -l serving.knative.dev/service=conforma-knative-service -n default &>/dev/null; do sleep 1; done
+kubectl wait --for=condition=Ready pod -l serving.knative.dev/service=conforma-knative-service -n default --timeout=30s
 
-echo "* Showing listener pod logs"
+echo "* Showing pod logs"
 sleep 2
-kubectl logs -l serving.knative.dev/service=conforma-verifier-listener -n default -c user-container --tail 100
+kubectl logs -l serving.knative.dev/service=conforma-knative-service -n default -c user-container --tail 100
 
 echo "* Find the new taskrun..."
 sleep 2

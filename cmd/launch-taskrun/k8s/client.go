@@ -10,7 +10,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	"github.com/conforma/conforma-verifier-listener/cmd/launch-taskrun/konflux"
+	"github.com/conforma/knative-service/cmd/launch-taskrun/konflux"
 )
 
 func NewK8sConfig() (*rest.Config, error) {

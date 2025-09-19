@@ -1,0 +1,7 @@
+#
+# https://editorconfig.org/
+# (This is mainly for Claude)
+#
+[*]
+insert_final_newline = true
+trim_trailing_whitespace = true

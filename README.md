@@ -1,10 +1,10 @@
-# Conforma Verifier Listener
+# Conforma Knative Service
 
 A Kubernetes-native, event-driven service that automatically triggers enterprise contract verification for application snapshots using Tekton bundles.
 
 ## Overview
 
-The Conforma Verifier Listener is a CloudEvents-based service that monitors for the creation of Snapshot resources and automatically triggers compliance verification workflows. It implements an event-driven architecture to bridge CloudEvents with Tekton pipelines, using bundle resolution to dynamically fetch verification tasks from container registries.
+The Conforma Knative Service is a CloudEvents-based service that monitors for the creation of Snapshot resources and automatically triggers compliance verification workflows. It implements an event-driven architecture to bridge CloudEvents with Tekton pipelines, using bundle resolution to dynamically fetch verification tasks from container registries.
 
 ## Architecture
 
@@ -198,8 +198,8 @@ go run cmd/launch-taskrun/main.go
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
 │   Kubernetes    │    │ Conforma         │    │   Tekton        │
-│   API Server    │───▶│ Verifier         │───▶│   Pipeline      │
-│                 │    │ Listener         │    │                 │
+│   API Server    │───▶│ Knative          │───▶│   Pipeline      │
+│                 │    │ Service          │    │                 │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
                               │
                               ▼
