@@ -142,8 +142,11 @@ func TestHandleCloudEvent_ValidSnapshot(t *testing.T) {
 	mockConfigMap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{Name: "taskrun-config"},
 		Data: map[string]string{
-			"POLICY_CONFIGURATION": "test-policy",
-			"PUBLIC_KEY":           "test-key",
+			"POLICY_CONFIGURATION":   "test-policy",
+			"PUBLIC_KEY_SECRET_NS":   "test-secret-ns",
+			"PUBLIC_KEY_SECRET_NAME": "test-secret-name",
+			"PUBLIC_KEY_SECRET_KEY":  "test-secret-key",
+			"PUBLIC_KEY":             "test-key",
 		},
 	}
 
@@ -156,6 +159,13 @@ func TestHandleCloudEvent_ValidSnapshot(t *testing.T) {
 
 	// Setup ECP lookup mocks - return empty lists to trigger fallback to config
 	mockCrtlClient.On("List", mock.Anything, mock.AnythingOfType("*konflux.ReleasePlanList"), mock.Anything).Return(fmt.Errorf("no release plans found"))
+
+	// Setup public key lookup mocks - return error to trigger fallback to config
+	mockCrtlClient.On("Get", mock.Anything, mock.MatchedBy(func(key client.ObjectKey) bool {
+		// Match either configured values or default values
+		return (key.Namespace == "test-secret-ns" && key.Name == "test-secret-name") ||
+			(key.Namespace == "openshift-pipelines" && key.Name == "public-key")
+	}), mock.AnythingOfType("*v1.Secret"), mock.Anything).Return(fmt.Errorf("secret not found"))
 
 	expectedTaskRun := &tektonv1.TaskRun{
 		ObjectMeta: metav1.ObjectMeta{
@@ -218,9 +228,12 @@ func TestReadConfigMap_Success(t *testing.T) {
 	expectedConfigMap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{Name: "taskrun-config"},
 		Data: map[string]string{
-			"POLICY_CONFIGURATION": "test-policy",
-			"PUBLIC_KEY":           "test-key",
-			"IGNORE_REKOR":         "true",
+			"POLICY_CONFIGURATION":   "test-policy",
+			"IGNORE_REKOR":           "true",
+			"PUBLIC_KEY_SECRET_NS":   "test-secret-ns",
+			"PUBLIC_KEY_SECRET_NAME": "test-secret-name",
+			"PUBLIC_KEY_SECRET_KEY":  "test-secret-key",
+			"PUBLIC_KEY":             "test-key",
 		},
 	}
 
@@ -340,6 +353,13 @@ func TestCreateTaskRun_Success(t *testing.T) {
 	// Setup ECP lookup mocks - return error to trigger fallback to config
 	mockCrtlClient.On("List", mock.Anything, mock.AnythingOfType("*konflux.ReleasePlanList"), mock.Anything).Return(fmt.Errorf("no release plans found"))
 
+	// Setup public key lookup mocks - return error to trigger fallback to config
+	mockCrtlClient.On("Get", mock.Anything, mock.MatchedBy(func(key client.ObjectKey) bool {
+		// Match either configured values or default values
+		return (key.Namespace == "test-secret-ns" && key.Name == "test-secret-name") ||
+			(key.Namespace == "openshift-pipelines" && key.Name == "public-key")
+	}), mock.AnythingOfType("*v1.Secret"), mock.Anything).Return(fmt.Errorf("secret not found"))
+
 	taskRun, err := service.createTaskRun(snapshot, config)
 
 	assert.NoError(t, err)
@@ -420,8 +440,11 @@ func TestProcessSnapshot_Success(t *testing.T) {
 	mockConfigMap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{Name: "taskrun-config"},
 		Data: map[string]string{
-			"POLICY_CONFIGURATION": "test-policy",
-			"PUBLIC_KEY":           "test-key",
+			"POLICY_CONFIGURATION":   "test-policy",
+			"PUBLIC_KEY_SECRET_NS":   "test-secret-ns",
+			"PUBLIC_KEY_SECRET_NAME": "test-secret-name",
+			"PUBLIC_KEY_SECRET_KEY":  "test-secret-key",
+			"PUBLIC_KEY":             "test-key",
 		},
 	}
 
@@ -434,6 +457,13 @@ func TestProcessSnapshot_Success(t *testing.T) {
 
 	// Setup ECP lookup mocks - return error to trigger fallback to config
 	mockCrtlClient.On("List", mock.Anything, mock.AnythingOfType("*konflux.ReleasePlanList"), mock.Anything).Return(fmt.Errorf("no release plans found"))
+
+	// Setup public key lookup mocks - return error to trigger fallback to config
+	mockCrtlClient.On("Get", mock.Anything, mock.MatchedBy(func(key client.ObjectKey) bool {
+		// Match either configured values or default values
+		return (key.Namespace == "test-secret-ns" && key.Name == "test-secret-name") ||
+			(key.Namespace == "openshift-pipelines" && key.Name == "public-key")
+	}), mock.AnythingOfType("*v1.Secret"), mock.Anything).Return(fmt.Errorf("secret not found"))
 
 	// Setup taskrun creation mock
 	expectedTaskRun := &tektonv1.TaskRun{
@@ -522,6 +552,13 @@ func TestProcessSnapshot_TaskRunCreationError(t *testing.T) {
 
 	// Setup ECP lookup mocks - return error to trigger fallback to config
 	mockCrtlClient.On("List", mock.Anything, mock.AnythingOfType("*konflux.ReleasePlanList"), mock.Anything).Return(fmt.Errorf("no release plans found"))
+
+	// Setup public key lookup mocks - return error to trigger fallback to config
+	mockCrtlClient.On("Get", mock.Anything, mock.MatchedBy(func(key client.ObjectKey) bool {
+		// Match either configured values or default values
+		return (key.Namespace == "test-secret-ns" && key.Name == "test-secret-name") ||
+			(key.Namespace == "openshift-pipelines" && key.Name == "public-key")
+	}), mock.AnythingOfType("*v1.Secret"), mock.Anything).Return(fmt.Errorf("secret not found"))
 
 	// Setup taskrun creation error
 	mockTaskRunCreator := &mockTektonTaskRunCreator{}
