@@ -334,6 +334,12 @@ func (s *Service) processSnapshot(ctx context.Context, snapshot *konflux.Snapsho
 		s.logger.Error(err, "Failed to create taskrun")
 		return fmt.Errorf("failed to create taskrun: %w", err)
 	}
+	if taskRun == nil {
+		// No error was returned, but also no TaskRun was created.
+		// Consider it processed successfully.
+		s.logger.Info("No VSA creation needed for this snapshot")
+		return nil
+	}
 	s.logger.Info("Successfully created taskrun spec", gozap.String("taskrunName", taskRun.Name))
 
 	// Add timeout for Tekton API call
@@ -442,11 +448,18 @@ func (s *Service) createTaskRun(snapshot *konflux.Snapshot, config *TaskRunConfi
 
 	ecp, err := s.findEcp(snapshot)
 	if err != nil {
-		// Fall back to the default
-		// TODO: We might reconsider the value in generating the VSA in this
-		// scenario. Perhaps it's better to bail out and do nothing.
-		ecp = config.PolicyConfiguration
-		s.logger.Info("Unable to find RPA in cluster. Falling back to default.", gozap.Error(err))
+		// If the findEcp lookup fails it generally means there was no ReleasePlan
+		// or no ReleasePlanAdmission found for the Snapshot's Application. In that
+		// situation we expect that the Snapshot is not likely to be released.
+		//
+		// This might change in future, but initially, the release pipeline is the
+		// only place where VSAs are considered, so if we think the Snapshot won't
+		// be released, then let's not bother creating a VSA.
+		//
+		// No TaskRun was created, but we don't consider it an error. Return a nil
+		// TaskRun and expect the caller to notice.
+		s.logger.Info("Unable to find RPA in cluster. Skipping VSA creation.", gozap.Error(err))
+		return nil, nil
 	} else {
 		s.logger.Info("Found RPA in cluster. Using correct ECP.")
 	}
