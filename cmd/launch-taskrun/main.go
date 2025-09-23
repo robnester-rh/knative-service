@@ -423,7 +423,8 @@ func (s *Service) findKey(config *TaskRunConfig) (string, error) {
 	}
 
 	ctx := context.Background()
-	return konflux.FindPublicKey(ctx, s.crtlClient, s.logger, secretNs, secretName, secretKey)
+	svk := konflux.NewSecretValueKey(secretNs, secretName, secretKey)
+	return konflux.FindPublicKey(ctx, s.crtlClient, s.logger, svk)
 }
 
 func (s *Service) createTaskRun(snapshot *konflux.Snapshot, config *TaskRunConfig) (*tektonv1.TaskRun, error) {

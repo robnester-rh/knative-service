@@ -111,7 +111,8 @@ func main() {
 	fmt.Printf("Found ECP name: %s\n", policyResult)
 
 	// Let's look up the public key also
-	publicKey, err := konflux.FindPublicKey(context.Background(), cli, logger, "openshift-pipelines", "public-key", "cosign.pub")
+	svk := konflux.NewSecretValueKey("openshift-pipelines", "public-key", "cosign.pub")
+	publicKey, err := konflux.FindPublicKey(context.Background(), cli, logger, svk)
 	if err != nil {
 		log.Fatalf("Failed to get public key: %v", err)
 	}

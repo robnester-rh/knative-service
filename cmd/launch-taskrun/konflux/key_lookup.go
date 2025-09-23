@@ -25,23 +25,36 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// Struct for specifying one particular value from a secret
+type SecretValueKey struct {
+	client.ObjectKey
+	SecretKey string
+}
+
+// Helper to create an instance of the SecretValueKey struct defined above
+func NewSecretValueKey(namespace, name, secretKey string) SecretValueKey {
+	return SecretValueKey{
+		ObjectKey: client.ObjectKey{Namespace: namespace, Name: name},
+		SecretKey: secretKey,
+	}
+}
+
 // FindPublicKey retrieves the cosign public key from the cluster secret
 // See also https://konflux.pages.redhat.com/docs/users/public-keys.html
-func FindPublicKey(ctx context.Context, cli ClientReader, logger Logger, secretNs, secretName, secretKey string) (string, error) {
+func FindPublicKey(ctx context.Context, cli ClientReader, logger Logger, svk SecretValueKey) (string, error) {
 	// Get the secret
 	var secret corev1.Secret
-	lookupKey := client.ObjectKey{Namespace: secretNs, Name: secretName}
-	err := cli.Get(ctx, lookupKey, &secret)
+	err := cli.Get(ctx, svk.ObjectKey, &secret)
 	if err != nil {
-		return "", fmt.Errorf("failed to get secret %s/%s: %w", secretNs, secretName, err)
+		return "", fmt.Errorf("failed to get secret %s/%s: %w", svk.Namespace, svk.Name, err)
 	}
 
 	// Extract cosign.pub data (which comes already base64 decoded)
-	cosignPubData, exists := secret.Data[secretKey]
+	cosignPubData, exists := secret.Data[svk.SecretKey]
 	if !exists {
-		return "", fmt.Errorf("%s not found in secret %s/%s", secretKey, secretNs, secretName)
+		return "", fmt.Errorf("%s not found in secret %s/%s", svk.SecretKey, svk.Namespace, svk.Name)
 	}
 
-	logger.Info("Found public key", gozap.String("namespace", secretNs), gozap.String("secret", secretName))
+	logger.Info("Found public key", gozap.String("namespace", svk.Namespace), gozap.String("secret", svk.Name))
 	return string(cosignPubData), nil
 }

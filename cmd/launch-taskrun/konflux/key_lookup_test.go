@@ -63,7 +63,7 @@ naYJRuLprwIv6FDhZ5yFjYUEtsmoNcW7rx2KM6FOXGsCX3BNc7qhHELT+g==
 	logger := &mockLogger{t: t}
 
 	// Test successful key lookup
-	result, err := FindPublicKey(context.Background(), cli, logger, secretNs, secretName, secretKey)
+	result, err := FindPublicKey(context.Background(), cli, logger, NewSecretValueKey(secretNs, secretName, secretKey))
 
 	assert.NoError(t, err)
 	assert.Equal(t, expectedKey, result)
@@ -86,7 +86,7 @@ func TestFindPublicKey_SecretNotFound(t *testing.T) {
 	secretKey := "test-key"
 
 	// Test secret not found error
-	result, err := FindPublicKey(context.Background(), cli, logger, secretNs, secretName, secretKey)
+	result, err := FindPublicKey(context.Background(), cli, logger, NewSecretValueKey(secretNs, secretName, secretKey))
 
 	assert.Error(t, err)
 	assert.Empty(t, result)
@@ -121,7 +121,7 @@ func TestFindPublicKey_KeyNotFoundInSecret(t *testing.T) {
 	logger := &mockLogger{t: t}
 
 	// Test key not found in secret
-	result, err := FindPublicKey(context.Background(), cli, logger, secretNs, secretName, secretKey)
+	result, err := FindPublicKey(context.Background(), cli, logger, NewSecretValueKey(secretNs, secretName, secretKey))
 
 	assert.Error(t, err)
 	assert.Empty(t, result)
@@ -157,7 +157,7 @@ func TestFindPublicKey_WithSpecialCharacters(t *testing.T) {
 	logger := &mockLogger{t: t}
 
 	// Test that special characters are handled correctly
-	result, err := FindPublicKey(context.Background(), cli, logger, secretNs, secretName, secretKey)
+	result, err := FindPublicKey(context.Background(), cli, logger, NewSecretValueKey(secretNs, secretName, secretKey))
 
 	assert.NoError(t, err)
 	assert.Equal(t, testKey, result)
@@ -189,7 +189,7 @@ func TestFindPublicKey_EmptySecret(t *testing.T) {
 	logger := &mockLogger{t: t}
 
 	// Test empty secret
-	result, err := FindPublicKey(context.Background(), cli, logger, secretNs, secretName, secretKey)
+	result, err := FindPublicKey(context.Background(), cli, logger, NewSecretValueKey(secretNs, secretName, secretKey))
 
 	assert.Error(t, err)
 	assert.Empty(t, result)
@@ -224,7 +224,7 @@ func TestFindPublicKey_EmptyKeyValue(t *testing.T) {
 	logger := &mockLogger{t: t}
 
 	// Test empty key value - should succeed but return empty string
-	result, err := FindPublicKey(context.Background(), cli, logger, secretNs, secretName, secretKey)
+	result, err := FindPublicKey(context.Background(), cli, logger, NewSecretValueKey(secretNs, secretName, secretKey))
 
 	assert.NoError(t, err)
 	assert.Equal(t, "", result)
@@ -258,7 +258,7 @@ func TestFindPublicKey_DifferentNamespace(t *testing.T) {
 	logger := &mockLogger{t: t}
 
 	// Test that function looks in correct namespace (should not find the secret)
-	result, err := FindPublicKey(context.Background(), cli, logger, secretNs, secretName, secretKey)
+	result, err := FindPublicKey(context.Background(), cli, logger, NewSecretValueKey(secretNs, secretName, secretKey))
 
 	assert.Error(t, err)
 	assert.Empty(t, result)
