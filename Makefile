@@ -17,6 +17,15 @@ EVENT_SOURCE_SELECTOR := eventing.knative.dev/sourceName=snapshot-events
 CLUSTER_NAME = $(shell kubectl config current-context | sed 's/kind-//')
 IS_KIND_CLUSTER = $(shell kubectl config current-context | grep -q "kind" && echo "true" || echo "false")
 
+# === LICENSE CHECKING ===
+.PHONY: license-check
+license-check: ## Check license headers in source files
+	@go run -modfile tools/go.mod github.com/google/addlicense -check -ignore '.github/ISSUE_TEMPLATE/**' -ignore '.github/PULL_REQUEST_TEMPLATE/**' -ignore '.github/dependabot.yml' -ignore 'vendor/**' -ignore 'node_modules/**' -ignore '*.md' -ignore '*.json' -ignore 'go.mod' -ignore 'go.sum' -ignore 'LICENSE' -ignore 'ko.yaml' -ignore '.ko.yaml' -ignore '.golangci.yml' -c 'The Conforma Contributors' -s -y 2025 .
+
+.PHONY: license-add
+license-add: ## Add license headers to source files that are missing them
+	@go run -modfile tools/go.mod github.com/google/addlicense -ignore '.github/ISSUE_TEMPLATE/**' -ignore '.github/PULL_REQUEST_TEMPLATE/**' -ignore '.github/dependabot.yml' -ignore 'vendor/**' -ignore 'node_modules/**' -ignore '*.md' -ignore '*.json' -ignore 'go.mod' -ignore 'go.sum' -ignore 'LICENSE' -ignore 'ko.yaml' -ignore '.ko.yaml' -ignore '.golangci.yml' -c 'The Conforma Contributors' -s -y 2025 .
+
 # === SHELL FUNCTIONS ===
 SHELL_FUNCTIONS = resolve_registry_image() { if [[ "$(KO_DOCKER_REPO)" == *":"* ]]; then echo "$(KO_DOCKER_REPO)"; else echo "$(KO_DOCKER_REPO):latest"; fi; }; \
 build_local_image() { echo "🔨 Building image locally with ko..." >&2; KO_DOCKER_REPO=ko.local ko build --local ./cmd/launch-taskrun 2>/dev/null | tail -1; }; \
