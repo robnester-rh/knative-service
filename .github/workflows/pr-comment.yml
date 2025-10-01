@@ -34,7 +34,7 @@ jobs:
     
     steps:
     - name: Download validation results
-      uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
       with:
         name: validation-results
         github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -53,7 +53,7 @@ jobs:
 
     - name: Comment on PR - Success
       if: steps.context.outputs.job_status == 'success'
-      uses: peter-evans/create-or-update-comment@c6c9a1a66007646a28c153e2a8580a5bad27bcfa # v4.0.0
+      uses: peter-evans/create-or-update-comment@71345be0265236311c031f5c7866368bd1eff043 # v4.0.0
       with:
         issue-number: ${{ steps.context.outputs.pr_number }}
         body: |
@@ -79,7 +79,7 @@ jobs:
 
     - name: Comment on PR - Failure
       if: steps.context.outputs.job_status != 'success'
-      uses: peter-evans/create-or-update-comment@c6c9a1a66007646a28c153e2a8580a5bad27bcfa # v4.0.0
+      uses: peter-evans/create-or-update-comment@71345be0265236311c031f5c7866368bd1eff043 # v4.0.0
       with:
         issue-number: ${{ steps.context.outputs.pr_number }}
         body: |
