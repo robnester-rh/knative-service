@@ -31,7 +31,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GO_VERSION: '1.24'
+  GO_VERSION: '1.24.4'
   QUAY_REPOSITORY: 'quay.io/conforma/knative-service'
   GOSEC_VERSION: 'c9453023c4e81ebdb6dde29e22d9cd5e2285fb16' # v2.22.8
   KO_VERSION: 'v0.18.0'  # Pin ko version for reproducibility
@@ -63,12 +63,15 @@ jobs:
       uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
       with:
         path: ~/go/pkg/mod
-        key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+        key: ${{ runner.os }}-go-${{ hashFiles('go.sum', 'tools/go.sum') }}
         restore-keys: |
           ${{ runner.os }}-go-
 
     - name: Download dependencies
       run: go mod download
+
+    - name: Download tools dependencies
+      run: go mod download -modfile tools/go.mod
 
     - name: Format check
       run: |
@@ -78,6 +81,11 @@ jobs:
           exit 1
         fi
         echo "✅ Code is properly formatted"
+
+    - name: License header check
+      run: |
+        echo "🔍 Checking license headers..."
+        go run -modfile tools/go.mod github.com/google/addlicense -check -ignore '.github/ISSUE_TEMPLATE/**' -ignore '.github/PULL_REQUEST_TEMPLATE/**' -ignore '.github/dependabot.yml' -ignore 'vendor/**' -ignore 'node_modules/**' -ignore '*.md' -ignore '*.json' -ignore 'go.mod' -ignore 'go.sum' -ignore 'LICENSE' -ignore 'ko.yaml' -ignore '.ko.yaml' -ignore '.golangci.yml' -c 'The Conforma Contributors' -s -y 2025 .
 
     - name: Run tests with coverage
       run: |
