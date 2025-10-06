@@ -315,9 +315,15 @@ func TestCreateTaskRun_Success(t *testing.T) {
 	}
 
 	config := &TaskRunConfig{
-		PolicyConfiguration: "test-policy",
-		PublicKey:           "test-key",
-		RekorHost:           "test-rekor",
+		PolicyConfiguration:     "test-policy",
+		PublicKey:               "test-key",
+		IgnoreRekor:             "true",
+		VsaSigningKeySecretName: "test-signing-key",
+		VsaUploadUrl:            "https://test-upload.example.com",
+		TaskName:                "generate-vsa",
+		Strict:                  "false",
+		Workers:                 "1",
+		Debug:                   "true",
 	}
 
 	// Setup mocks using helper functions

@@ -23,6 +23,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -221,29 +222,54 @@ type CloudEventData struct {
 }
 
 type TaskRunConfig struct {
-	PolicyConfiguration             string `json:"POLICY_CONFIGURATION"`
-	PublicKey                       string `json:"PUBLIC_KEY"`
-	RekorHost                       string `json:"REKOR_HOST"`
-	IgnoreRekor                     string `json:"IGNORE_REKOR"`
-	Strict                          string `json:"STRICT"`
-	Info                            string `json:"INFO"`
-	TufMirror                       string `json:"TUF_MIRROR"`
-	SslCertDir                      string `json:"SSL_CERT_DIR"`
-	CaTrustConfigmapName            string `json:"CA_TRUST_CONFIGMAP_NAME"`
-	CaTrustConfigMapKey             string `json:"CA_TRUST_CONFIG_MAP_KEY"`
-	ExtraRuleData                   string `json:"EXTRA_RULE_DATA"`
-	SingleComponent                 string `json:"SINGLE_COMPONENT"`
-	SingleComponentCustomResource   string `json:"SINGLE_COMPONENT_CUSTOM_RESOURCE"`
-	SingleComponentCustomResourceNs string `json:"SINGLE_COMPONENT_CUSTOM_RESOURCE_NS"`
+	// Core VSA Configuration
+	PolicyConfiguration     string `json:"POLICY_CONFIGURATION"`
+	PublicKey               string `json:"PUBLIC_KEY"`
+	IgnoreRekor             string `json:"IGNORE_REKOR"`
+	VsaSigningKeySecretName string `json:"VSA_SIGNING_KEY_SECRET_NAME"`
+	VsaUploadUrl            string `json:"VSA_UPLOAD_URL"`
+	TaskName                string `json:"TASK_NAME"`
+
+	// Performance & Behavior Configuration
+	Strict  string `json:"STRICT"`
+	Workers string `json:"WORKERS"`
+	Debug   string `json:"DEBUG"`
+
+	// Operational Configuration
+	CacheTTLMinutes      string `json:"CACHE_TTL_MINUTES"`
+	TektonTimeoutSeconds string `json:"TEKTON_TIMEOUT_SECONDS"`
+	VsaExpirationHours   string `json:"VSA_EXPIRATION_HOURS"`
+
+	// Resilience Configuration
+	TektonRetryAttempts     string `json:"TEKTON_RETRY_ATTEMPTS"`
+	TektonRetryDelaySeconds string `json:"TEKTON_RETRY_DELAY_SECONDS"`
+	K8sRetryAttempts        string `json:"K8S_RETRY_ATTEMPTS"`
+	K8sRetryDelaySeconds    string `json:"K8S_RETRY_DELAY_SECONDS"`
+	CircuitBreakerThreshold string `json:"CIRCUIT_BREAKER_THRESHOLD"`
+	CircuitBreakerTimeout   string `json:"CIRCUIT_BREAKER_TIMEOUT_SECONDS"`
+
+	// Resource Configuration
+	TaskCpuRequest    string `json:"TASK_CPU_REQUEST"`
+	TaskMemoryRequest string `json:"TASK_MEMORY_REQUEST"`
+	TaskMemoryLimit   string `json:"TASK_MEMORY_LIMIT"`
+}
+
+// CircuitBreakerState tracks the state of external service calls
+type CircuitBreakerState struct {
+	mu          sync.RWMutex
+	failures    int
+	lastFailure time.Time
+	isOpen      bool
 }
 
 type Service struct {
-	k8sClient     K8sClient
-	tektonClient  TektonClient
-	crtlClient    ControllerRuntimeClient
-	logger        Logger
-	configMapName string
-	configCache   *configMapCache
+	k8sClient      K8sClient
+	tektonClient   TektonClient
+	crtlClient     ControllerRuntimeClient
+	logger         Logger
+	configMapName  string
+	configCache    *configMapCache
+	circuitBreaker *CircuitBreakerState
 }
 
 type ServiceConfig struct {
@@ -259,12 +285,13 @@ func NewServiceWithDependencies(k8s K8sClient, tekton TektonClient, crtlClient C
 		config.CacheTTL = 5 * time.Minute // Default 5 minute TTL
 	}
 	return &Service{
-		k8sClient:     k8s,
-		tektonClient:  tekton,
-		crtlClient:    crtlClient,
-		logger:        logger,
-		configMapName: config.ConfigMapName,
-		configCache:   newConfigMapCache(config.CacheTTL),
+		k8sClient:      k8s,
+		tektonClient:   tekton,
+		crtlClient:     crtlClient,
+		logger:         logger,
+		configMapName:  config.ConfigMapName,
+		configCache:    newConfigMapCache(config.CacheTTL),
+		circuitBreaker: &CircuitBreakerState{},
 	}
 }
 
@@ -317,6 +344,7 @@ func (s *Service) handleCloudEvent(ctx context.Context, event cloudevents.Event)
 }
 
 func (s *Service) processSnapshot(ctx context.Context, snapshot *konflux.Snapshot) error {
+	startTime := time.Now()
 	s.logger.Info("Starting to process snapshot", gozap.String("name", snapshot.Name), gozap.String("namespace", snapshot.Namespace))
 
 	config, err := s.readConfigMap(ctx, snapshot.Namespace)
@@ -334,21 +362,42 @@ func (s *Service) processSnapshot(ctx context.Context, snapshot *konflux.Snapsho
 	if taskRun == nil {
 		// No error was returned, but also no TaskRun was created.
 		// Consider it processed successfully.
-		s.logger.Info("No VSA creation needed for this snapshot")
+		totalDuration := time.Since(startTime)
+		s.logger.Info("No VSA creation needed for this snapshot",
+			gozap.Duration("processing_duration_ms", totalDuration))
 		return nil
 	}
 	s.logger.Info("Successfully created taskrun spec", gozap.String("taskrunName", taskRun.Name))
 
-	// Add timeout for Tekton API call
-	trCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	createdTaskRun, err := s.tektonClient.TektonV1().TaskRuns(snapshot.Namespace).Create(trCtx, taskRun, metav1.CreateOptions{})
+	// Create TaskRun with retry logic and configurable timeout
+	var createdTaskRun *tektonv1.TaskRun
+	err = s.retryWithBackoff(config, "create-taskrun", func() error {
+		// Add timeout for Tekton API call (configurable)
+		timeoutSeconds := 5 // Default
+		if config.TektonTimeoutSeconds != "" {
+			if parsed, parseErr := strconv.Atoi(config.TektonTimeoutSeconds); parseErr == nil && parsed > 0 {
+				timeoutSeconds = parsed
+			}
+		}
+		trCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
+		defer cancel()
+
+		var createErr error
+		createdTaskRun, createErr = s.tektonClient.TektonV1().TaskRuns(snapshot.Namespace).Create(trCtx, taskRun, metav1.CreateOptions{})
+		return createErr
+	})
 	if err != nil {
-		s.logger.Error(err, "Failed to create taskrun in cluster")
-		return fmt.Errorf("failed to create taskrun in cluster: %w", err)
+		s.logger.Error(err, "Failed to create taskrun in cluster after retries")
+		return fmt.Errorf("failed to create taskrun in cluster after retries: %w", err)
 	}
 
-	s.logger.Info("Successfully created TaskRun", gozap.String("name", createdTaskRun.Name), gozap.String("namespace", createdTaskRun.Namespace))
+	// Log performance metrics
+	totalDuration := time.Since(startTime)
+	s.logger.Info("Successfully created TaskRun",
+		gozap.String("name", createdTaskRun.Name),
+		gozap.String("namespace", createdTaskRun.Namespace),
+		gozap.String("snapshot", snapshot.Name),
+		gozap.Duration("processing_duration_ms", totalDuration))
 	return nil
 }
 
@@ -375,11 +424,192 @@ func (s *Service) readConfigMap(ctx context.Context, namespace string) (*TaskRun
 	if val, exists := configMap.Data["IGNORE_REKOR"]; exists {
 		config.IgnoreRekor = val
 	}
+	if val, exists := configMap.Data["VSA_SIGNING_KEY_SECRET_NAME"]; exists {
+		config.VsaSigningKeySecretName = val
+	}
+	if val, exists := configMap.Data["VSA_UPLOAD_URL"]; exists {
+		config.VsaUploadUrl = val
+	}
+	if val, exists := configMap.Data["TASK_NAME"]; exists {
+		config.TaskName = val
+	}
+	if val, exists := configMap.Data["STRICT"]; exists {
+		config.Strict = val
+	}
+	if val, exists := configMap.Data["WORKERS"]; exists {
+		config.Workers = val
+	}
+	if val, exists := configMap.Data["DEBUG"]; exists {
+		config.Debug = val
+	}
+	if val, exists := configMap.Data["CACHE_TTL_MINUTES"]; exists {
+		config.CacheTTLMinutes = val
+	}
+	if val, exists := configMap.Data["TEKTON_TIMEOUT_SECONDS"]; exists {
+		config.TektonTimeoutSeconds = val
+	}
+	if val, exists := configMap.Data["VSA_EXPIRATION_HOURS"]; exists {
+		config.VsaExpirationHours = val
+	}
+	if val, exists := configMap.Data["TEKTON_RETRY_ATTEMPTS"]; exists {
+		config.TektonRetryAttempts = val
+	}
+	if val, exists := configMap.Data["TEKTON_RETRY_DELAY_SECONDS"]; exists {
+		config.TektonRetryDelaySeconds = val
+	}
+	if val, exists := configMap.Data["K8S_RETRY_ATTEMPTS"]; exists {
+		config.K8sRetryAttempts = val
+	}
+	if val, exists := configMap.Data["K8S_RETRY_DELAY_SECONDS"]; exists {
+		config.K8sRetryDelaySeconds = val
+	}
+	if val, exists := configMap.Data["CIRCUIT_BREAKER_THRESHOLD"]; exists {
+		config.CircuitBreakerThreshold = val
+	}
+	if val, exists := configMap.Data["CIRCUIT_BREAKER_TIMEOUT_SECONDS"]; exists {
+		config.CircuitBreakerTimeout = val
+	}
+	if val, exists := configMap.Data["TASK_CPU_REQUEST"]; exists {
+		config.TaskCpuRequest = val
+	}
+	if val, exists := configMap.Data["TASK_MEMORY_REQUEST"]; exists {
+		config.TaskMemoryRequest = val
+	}
+	if val, exists := configMap.Data["TASK_MEMORY_LIMIT"]; exists {
+		config.TaskMemoryLimit = val
+	}
 
 	// Cache the fetched config
 	s.configCache.set(namespace, config)
 	s.logger.Info("Fetched and cached config for namespace", gozap.String("namespace", namespace))
 	return config, nil
+}
+
+// Circuit breaker and resilience methods
+func (s *Service) checkCircuitBreaker(config *TaskRunConfig, operation string) bool {
+	s.circuitBreaker.mu.RLock()
+	defer s.circuitBreaker.mu.RUnlock()
+
+	if !s.circuitBreaker.isOpen {
+		return false // Circuit is closed, allow operation
+	}
+
+	// Check if circuit breaker timeout has passed
+	timeoutSeconds := 30 // Default
+	if config.CircuitBreakerTimeout != "" {
+		if parsed, parseErr := strconv.Atoi(config.CircuitBreakerTimeout); parseErr == nil && parsed > 0 {
+			timeoutSeconds = parsed
+		}
+	}
+
+	if time.Since(s.circuitBreaker.lastFailure) > time.Duration(timeoutSeconds)*time.Second {
+		s.logger.Info("Circuit breaker timeout expired, allowing operation",
+			gozap.String("operation", operation))
+		return false // Allow operation to test if service is back
+	}
+
+	s.logger.Warn("Circuit breaker is open, blocking operation",
+		gozap.String("operation", operation),
+		gozap.Int("failures", s.circuitBreaker.failures))
+	return true // Block operation
+}
+
+func (s *Service) recordFailure(config *TaskRunConfig, operation string) {
+	s.circuitBreaker.mu.Lock()
+	defer s.circuitBreaker.mu.Unlock()
+
+	s.circuitBreaker.failures++
+	s.circuitBreaker.lastFailure = time.Now()
+
+	threshold := 5 // Default
+	if config.CircuitBreakerThreshold != "" {
+		if parsed, parseErr := strconv.Atoi(config.CircuitBreakerThreshold); parseErr == nil && parsed > 0 {
+			threshold = parsed
+		}
+	}
+
+	if s.circuitBreaker.failures >= threshold && !s.circuitBreaker.isOpen {
+		s.circuitBreaker.isOpen = true
+		s.logger.Error(nil, "ALERT: Circuit breaker opened - external service degraded",
+			gozap.String("alert_type", "circuit_breaker_opened"),
+			gozap.String("service", "external_dependency"),
+			gozap.String("operation", operation),
+			gozap.Int("consecutive_failures", s.circuitBreaker.failures),
+			gozap.Int("failure_threshold", threshold),
+			gozap.Time("last_failure", s.circuitBreaker.lastFailure))
+	}
+}
+
+func (s *Service) recordSuccess(operation string) {
+	s.circuitBreaker.mu.Lock()
+	defer s.circuitBreaker.mu.Unlock()
+
+	if s.circuitBreaker.isOpen {
+		s.logger.Info("RECOVERY: Circuit breaker closed - external service recovered",
+			gozap.String("alert_type", "circuit_breaker_closed"),
+			gozap.String("service", "external_dependency"),
+			gozap.String("operation", operation),
+			gozap.Int("previous_failures", s.circuitBreaker.failures),
+			gozap.Duration("downtime_duration", time.Since(s.circuitBreaker.lastFailure)))
+	}
+
+	// Reset circuit breaker state on success
+	s.circuitBreaker.failures = 0
+	s.circuitBreaker.isOpen = false
+}
+
+func (s *Service) retryWithBackoff(config *TaskRunConfig, operation string, fn func() error) error {
+	// Check circuit breaker first
+	if s.checkCircuitBreaker(config, operation) {
+		return fmt.Errorf("circuit breaker is open for operation: %s", operation)
+	}
+
+	maxAttempts := 3 // Default
+	if config.TektonRetryAttempts != "" {
+		if parsed, parseErr := strconv.Atoi(config.TektonRetryAttempts); parseErr == nil && parsed > 0 {
+			maxAttempts = parsed
+		}
+	}
+
+	retryDelay := 2 * time.Second // Default
+	if config.TektonRetryDelaySeconds != "" {
+		if parsed, parseErr := strconv.Atoi(config.TektonRetryDelaySeconds); parseErr == nil && parsed > 0 {
+			retryDelay = time.Duration(parsed) * time.Second
+		}
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if err := fn(); err != nil {
+			lastErr = err
+			s.recordFailure(config, operation)
+
+			if attempt < maxAttempts {
+				s.logger.Warn("Operation failed, retrying",
+					gozap.String("operation", operation),
+					gozap.Int("attempt", attempt),
+					gozap.Int("maxAttempts", maxAttempts),
+					gozap.Duration("retryDelay", retryDelay),
+					gozap.Error(err))
+				time.Sleep(retryDelay)
+				continue
+			}
+			// Final attempt failed
+			s.logger.Error(lastErr, "Operation failed after all retry attempts",
+				gozap.String("operation", operation),
+				gozap.Int("attempts", maxAttempts))
+			return lastErr
+		}
+		// Success
+		s.recordSuccess(operation)
+		if attempt > 1 {
+			s.logger.Info("Operation succeeded after retry",
+				gozap.String("operation", operation),
+				gozap.Int("attempt", attempt))
+		}
+		return nil
+	}
+	return lastErr
 }
 
 func (s *Service) findEcp(snapshot *konflux.Snapshot) (string, error) {
@@ -388,13 +618,22 @@ func (s *Service) findEcp(snapshot *konflux.Snapshot) (string, error) {
 }
 
 func (s *Service) createTaskRun(snapshot *konflux.Snapshot, config *TaskRunConfig) (*tektonv1.TaskRun, error) {
+	// Validate required fields
+	if config.TaskName == "" {
+		return nil, fmt.Errorf("TASK_NAME is required but not set in configmap")
+	}
+
 	// Use the raw JSON spec directly
 	specJSON := snapshot.Spec
 
-	// It seems unlikely we'll get invalid json but let's be defensive
-	var validationTarget interface{}
-	if err := json.Unmarshal(specJSON, &validationTarget); err != nil {
-		return nil, fmt.Errorf("failed to marshal snapshot spec: %w", err)
+	// Extract the primary image from the snapshot spec
+	var snapshotSpec struct {
+		Components []struct {
+			ContainerImage string `json:"containerImage"`
+		} `json:"components"`
+	}
+	if err := json.Unmarshal(specJSON, &snapshotSpec); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal snapshot spec to extract components: %w", err)
 	}
 
 	// log the specJSON
@@ -402,7 +641,15 @@ func (s *Service) createTaskRun(snapshot *konflux.Snapshot, config *TaskRunConfi
 	// Helper function to create ParamValue with validation
 	createParamValue := func(value string) tektonv1.ParamValue {
 		if value == "" {
-			value = "true" // Default to "true" for empty values
+			value = "true" // Default to "true" for boolean-like empty values
+		}
+		return tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: value}
+	}
+
+	// Helper for numeric parameters with specific defaults
+	createNumericParamValue := func(value, defaultValue string) tektonv1.ParamValue {
+		if value == "" {
+			value = defaultValue
 		}
 		return tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: value}
 	}
@@ -425,15 +672,22 @@ func (s *Service) createTaskRun(snapshot *konflux.Snapshot, config *TaskRunConfi
 		s.logger.Info("Found RPA in cluster. Using correct ECP.")
 	}
 
+	s.logger.Info("Using VSA signing key from mounted secret.")
+
+	// Validate VSA upload URL is configured
+	if config.VsaUploadUrl == "" {
+		return nil, fmt.Errorf("VSA upload URL is not set")
+	}
+
 	params := []tektonv1.Param{
+		{Name: "IMAGES", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: string(specJSON)}},
 		{Name: "POLICY_CONFIGURATION", Value: createParamValue(ecp)},
 		{Name: "PUBLIC_KEY", Value: createParamValue(config.PublicKey)},
+		{Name: "VSA_UPLOAD_URL", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: config.VsaUploadUrl}},
 		{Name: "IGNORE_REKOR", Value: createParamValue(config.IgnoreRekor)},
-		{Name: "STRICT", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "true"}},
-		{Name: "INFO", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "true"}},
-		{Name: "show-successes", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "true"}},
-		{Name: "WORKERS", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "1"}},
-		{Name: "IMAGES", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: string(specJSON)}},
+		{Name: "STRICT", Value: createParamValue(config.Strict)},
+		{Name: "WORKERS", Value: createNumericParamValue(config.Workers, "1")},
+		{Name: "DEBUG", Value: createParamValue(config.Debug)},
 	}
 
 	// Debug logging for all parameters
@@ -441,18 +695,9 @@ func (s *Service) createTaskRun(snapshot *konflux.Snapshot, config *TaskRunConfi
 		s.logger.Info("TaskRun param", gozap.String("name", param.Name), gozap.String("type", string(param.Value.Type)), gozap.String("value", param.Value.StringVal))
 	}
 
-	// Debug logging for resolver parameters
-	resolverParams := []tektonv1.Param{
-		{Name: "bundle", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "quay.io/conforma/tekton-task:latest"}},
-		{Name: "name", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "verify-enterprise-contract"}},
-	}
-	for _, param := range resolverParams {
-		s.logger.Info("Resolver param", gozap.String("name", param.Name), gozap.String("type", string(param.Value.Type)), gozap.String("value", param.Value.StringVal))
-	}
-
 	return &tektonv1.TaskRun{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("verify-enterprise-contract-%s-%d", snapshot.Name, time.Now().Unix()),
+			Name:      fmt.Sprintf("verify-conforma-%s-%d", snapshot.Name, time.Now().Unix()),
 			Namespace: snapshot.Namespace,
 			Labels: map[string]string{
 				"app.kubernetes.io/name":       "verify-and-create-vsa",
@@ -464,12 +709,20 @@ func (s *Service) createTaskRun(snapshot *konflux.Snapshot, config *TaskRunConfi
 		},
 		Spec: tektonv1.TaskRunSpec{
 			TaskRef: &tektonv1.TaskRef{
-				ResolverRef: tektonv1.ResolverRef{
-					Resolver: "bundles",
-					Params:   resolverParams,
+				Kind:       "Task",
+				Name:       config.TaskName,
+				APIVersion: "tekton.dev/v1",
+			},
+			Params:             params,
+			ServiceAccountName: "conforma-vsa-generator",
+			Workspaces: []tektonv1.WorkspaceBinding{
+				{
+					Name: "signing-key",
+					Secret: &corev1.SecretVolumeSource{
+						SecretName: config.VsaSigningKeySecretName,
+					},
 				},
 			},
-			Params: params,
 		},
 	}, nil
 }
@@ -503,6 +756,16 @@ func main() {
 		cehttp.WithPath("/"),
 		cehttp.WithMiddleware(func(next http.Handler) http.Handler {
 			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Health check endpoint for observability
+				if r.URL.Path == "/health" && r.Method == "GET" {
+					w.WriteHeader(http.StatusOK)
+					if _, writeErr := w.Write([]byte("OK")); writeErr != nil {
+						// Log but don't fail - health check should be resilient
+						log.Printf("Health check response write failed: %v", writeErr)
+					}
+					return
+				}
+
 				if r.Header.Get("Ce-Type") != "dev.knative.apiserver.resource.add" {
 					w.WriteHeader(http.StatusAccepted)
 					return
