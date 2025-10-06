@@ -1,0 +1,73 @@
+# Copyright The Conforma Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# SPDX-License-Identifier: Apache-2.0
+
+---
+# Namespace for demo tenant
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rhtap-releng-tenant
+---
+# Namespace for pipelines
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: openshift-pipelines
+---
+# ReleasePlan for VSA demo application
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: ReleasePlan
+metadata:
+  name: vsa-demo-release-plan
+  namespace: default
+  labels:
+    release.appstudio.openshift.io/releasePlanAdmission: vsa-demo-rpa
+spec:
+  application: vsa-demo-application
+  target: rhtap-releng-tenant
+---
+# ReleasePlanAdmission for VSA demo
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: ReleasePlanAdmission
+metadata:
+  name: vsa-demo-rpa
+  namespace: rhtap-releng-tenant
+spec:
+  applications:
+    - vsa-demo-application
+  origin: demo
+  policy: vsa-demo-policy
+---
+# EnterpriseContractPolicy for VSA demo
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: EnterpriseContractPolicy
+metadata:
+  name: vsa-demo-policy
+  namespace: rhtap-releng-tenant
+spec:
+  description: "VSA Generation Demo Policy - Less strict for demo purposes"
+  publicKey: "k8s://openshift-pipelines/vsa-demo-public-key"
+---
+# Public key secret for VSA demo (will be updated by script)
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vsa-demo-public-key
+  namespace: openshift-pipelines
+type: Opaque
+data:
+  # This will be populated by the demo script with the generated public key
+  cosign.pub: ""
