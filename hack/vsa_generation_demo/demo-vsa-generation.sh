@@ -34,16 +34,11 @@ cleanup_generation_demo() {
     kubectl delete secret vsa-signing-key --ignore-not-found -n "${DEMO_NAMESPACE}" 2>/dev/null || true
     kubectl delete secret public-key --ignore-not-found -n openshift-pipelines 2>/dev/null || true
     
-    # Remove demo resources
+    # Remove demo resources (but not core service components)
     kubectl delete -f hack/vsa_generation_demo/vsa-demo-resources.yaml --ignore-not-found 2>/dev/null || true
     
-    # Remove the generate-vsa Tekton task
-    kubectl delete -f config/base/generate-vsa.yaml --ignore-not-found 2>/dev/null || true
-    
-    # Remove RBAC for task runner
-    kubectl delete -f config/base/task-runner-rbac.yaml --ignore-not-found 2>/dev/null || true
-    
-    # Note: We don't remove Tekton Pipelines as other workloads might be using it
+    # Note: We don't remove core service components (generate-vsa task, RBAC, etc.)
+    # as they're part of the main service deployment and may be used by other workflows
     
     # Clean up generated keys
     DEMO_KEYS_DIR="hack/vsa_generation_demo"
@@ -93,16 +88,11 @@ echo "Working from: $(pwd)"
 echo "=========================================="
 echo ""
 
-# Clean up any conflicting resources from previous demos
+# Clean up any conflicting demo resources from previous runs
 echo "🔄 Cleaning up any existing demo resources..."
 kubectl delete namespace rhtap-releng-tenant openshift-pipelines registry --ignore-not-found 2>/dev/null || true
-kubectl delete task generate-vsa --ignore-not-found -n default 2>/dev/null || true
-kubectl delete serviceaccount conforma-vsa-generator --ignore-not-found -n default 2>/dev/null || true
-kubectl delete clusterrole conforma-vsa-generator-cluster --ignore-not-found 2>/dev/null || true
-kubectl delete clusterrolebinding conforma-vsa-generator-cluster --ignore-not-found 2>/dev/null || true
 # Clean up any existing port-forwards
 pkill -f "kubectl.*port-forward.*registry" 2>/dev/null || true
-
 sleep 2
 
 # Configuration
@@ -375,39 +365,21 @@ fi
 
 echo ""
 echo "🔧 Step 5: Setting up demo resources..."
-# Check if Tekton Pipelines is installed, install if needed
-if ! kubectl get crd tasks.tekton.dev > /dev/null 2>&1; then
-    echo "  Installing Tekton Pipelines..."
-    kubectl apply -f https://storage.googleapis.com/tekton-releases/pipeline/latest/release.yaml > /dev/null 2>&1
-    echo "  Waiting for Tekton Pipelines to be ready..."
-    kubectl wait --for=condition=ready pod -l app=tekton-pipelines-controller -n tekton-pipelines --timeout=300s > /dev/null 2>&1
-    echo "  Tekton Pipelines installed"
-else
-    echo "  Tekton Pipelines already installed"
+# Check prerequisites (assume service is deployed via make deploy-local)
+echo "  Checking prerequisites..."
+if ! kubectl get task generate-vsa -n default > /dev/null 2>&1; then
+    echo "  ⚠️  generate-vsa task not found. Please deploy the service first:"
+    echo "     make deploy-local"
+    exit 1
 fi
 
-# Install CRDs
-echo "  Installing CRDs..."
-kubectl apply \
-  -f https://raw.githubusercontent.com/konflux-ci/application-api/refs/heads/main/manifests/application-api-customresourcedefinitions.yaml \
-  -f https://raw.githubusercontent.com/konflux-ci/release-service/refs/heads/main/config/crd/bases/appstudio.redhat.com_releaseplanadmissions.yaml \
-  -f https://raw.githubusercontent.com/konflux-ci/release-service/refs/heads/main/config/crd/bases/appstudio.redhat.com_releaseplans.yaml \
-  -f https://raw.githubusercontent.com/conforma/crds/refs/heads/main/config/crd/bases/appstudio.redhat.com_enterprisecontractpolicies.yaml \
-  > /dev/null 2>&1
+if ! kubectl get serviceaccount conforma-vsa-generator -n default > /dev/null 2>&1; then
+    echo "  ⚠️  conforma-vsa-generator service account not found. Please deploy the service first:"
+    echo "     make deploy-local"
+    exit 1
+fi
 
-# Wait for CRDs
-echo "  Waiting for CRDs to be ready..."
-./hack/wait-for-resources.sh crd established 60s snapshots.appstudio.redhat.com releaseplans.appstudio.redhat.com releaseplanadmissions.appstudio.redhat.com enterprisecontractpolicies.appstudio.redhat.com > /dev/null
-
-# Apply the generate-vsa Tekton task (required for VSA generation)
-echo "  Installing generate-vsa Tekton task..."
-kubectl apply -f config/base/generate-vsa.yaml
-echo "  Tekton task installed"
-
-# Apply RBAC for task runner (required for cross-namespace access)
-echo "  Installing RBAC for task runner..."
-kubectl apply -f config/base/task-runner-rbac.yaml
-echo "  Task runner RBAC installed"
+echo "  ✅ Prerequisites satisfied (service appears to be deployed)"
 
 echo "  Using default namespace with standard secret names (no ConfigMap changes needed)"
 

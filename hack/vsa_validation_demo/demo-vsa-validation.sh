@@ -34,11 +34,8 @@ cleanup_validation_demo() {
     kubectl delete -f /tmp/validation-demo-resources.yaml --ignore-not-found 2>/dev/null || true
     rm -f /tmp/validation-demo-resources.yaml 2>/dev/null || true
     
-    # Remove the generate-vsa Tekton task
-    kubectl delete -f config/base/generate-vsa.yaml --ignore-not-found 2>/dev/null || true
-    
-    # Remove RBAC for task runner
-    kubectl delete -f config/base/task-runner-rbac.yaml --ignore-not-found 2>/dev/null || true
+    # Note: We don't remove core service components (generate-vsa task, RBAC, etc.)
+    # as they're part of the main service deployment
     
     # Clean up old TaskRuns created by this demo (keep recent ones, remove old ones)
     kubectl get taskruns -n default --no-headers -o custom-columns=":metadata.name,:metadata.creationTimestamp" 2>/dev/null | \
@@ -71,36 +68,21 @@ VALIDATION_DEMO_PREFIX="validation-$(date +%s)"
 echo "* Using validation demo prefix: ${VALIDATION_DEMO_PREFIX}"
 sleep 2
 
-# Check if Tekton Pipelines is installed, install if needed
-if ! kubectl get crd tasks.tekton.dev > /dev/null 2>&1; then
-    echo "* Installing Tekton Pipelines..."
-    kubectl apply -f https://storage.googleapis.com/tekton-releases/pipeline/latest/release.yaml > /dev/null 2>&1
-    echo "* Waiting for Tekton Pipelines to be ready..."
-    kubectl wait --for=condition=ready pod -l app=tekton-pipelines-controller -n tekton-pipelines --timeout=300s > /dev/null 2>&1
-    echo "* Tekton Pipelines installed"
-else
-    echo "* Tekton Pipelines already installed"
+# Check prerequisites (assume service is deployed via make deploy-local)
+echo "* Checking prerequisites..."
+if ! kubectl get task generate-vsa -n default > /dev/null 2>&1; then
+    echo "  ⚠️  generate-vsa task not found. Please deploy the service first:"
+    echo "     make deploy-local"
+    exit 1
 fi
 
-echo "* Installing official CRDs (ReleasePlan, ReleasePlanAdmission, EnterpriseContractPolicy)..."
-kubectl apply \
-  -f https://raw.githubusercontent.com/konflux-ci/application-api/refs/heads/main/manifests/application-api-customresourcedefinitions.yaml \
-  -f https://raw.githubusercontent.com/konflux-ci/release-service/refs/heads/main/config/crd/bases/appstudio.redhat.com_releaseplanadmissions.yaml \
-  -f https://raw.githubusercontent.com/konflux-ci/release-service/refs/heads/main/config/crd/bases/appstudio.redhat.com_releaseplans.yaml \
-  -f https://raw.githubusercontent.com/conforma/crds/refs/heads/main/config/crd/bases/appstudio.redhat.com_enterprisecontractpolicies.yaml
+if ! kubectl get serviceaccount conforma-vsa-generator -n default > /dev/null 2>&1; then
+    echo "  ⚠️  conforma-vsa-generator service account not found. Please deploy the service first:"
+    echo "     make deploy-local"
+    exit 1
+fi
 
-echo "* Waiting for CRDs to be ready..."
-./hack/wait-for-resources.sh crd established 60s snapshots.appstudio.redhat.com releaseplans.appstudio.redhat.com releaseplanadmissions.appstudio.redhat.com enterprisecontractpolicies.appstudio.redhat.com
-
-# Apply the generate-vsa Tekton task (required for VSA generation)
-echo "* Installing generate-vsa Tekton task..."
-kubectl apply -f config/base/generate-vsa.yaml
-echo "* Tekton task installed"
-
-# Apply RBAC for task runner (required for cross-namespace access)
-echo "* Installing RBAC for task runner..."
-kubectl apply -f config/base/task-runner-rbac.yaml
-echo "* Task runner RBAC installed"
+echo "  ✅ Prerequisites satisfied (service appears to be deployed)"
 
 echo "* Creating validation demo resources with unique names..."
 # Create dynamic validation demo resources to avoid conflicts
