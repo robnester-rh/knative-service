@@ -68,7 +68,7 @@ cleanup_complete_demo() {
     kubectl delete secret vsa-complete-demo-public-key --ignore-not-found -n openshift-pipelines 2>/dev/null || true
     
     # Remove demo resources
-    kubectl delete -f hack/vsa_generation_demo/vsa-demo-resources.yaml --ignore-not-found 2>/dev/null || true
+    kubectl delete -f hack/demos/vsa-demo-resources.yaml --ignore-not-found 2>/dev/null || true
     
     # Remove the generate-vsa Tekton task
     kubectl delete -f config/base/generate-vsa.yaml --ignore-not-found 2>/dev/null || true
@@ -85,10 +85,10 @@ cleanup_complete_demo() {
     pkill -f "kubectl.*port-forward.*registry.*5001:5000" 2>/dev/null || true
     
     # Clean up in-cluster registry
-    kubectl delete -f hack/vsa_generation_demo/in-cluster-registry.yaml --ignore-not-found 2>/dev/null || true
+    kubectl delete -f hack/demos/in-cluster-registry.yaml --ignore-not-found 2>/dev/null || true
     
     # Clean up generated keys
-    DEMO_KEYS_DIR="hack/vsa_generation_demo"
+    DEMO_KEYS_DIR="hack/demos"
     rm -f "${DEMO_KEYS_DIR}/vsa-complete-demo-keys.key" "${DEMO_KEYS_DIR}/vsa-complete-demo-keys.pub" 2>/dev/null || true
     
     # Clean up temporary files
@@ -107,7 +107,7 @@ trap 'echo ""; echo "🛑 Demo interrupted - cleaning up..."; cleanup_complete_d
 
 echo "🔧 Step 1: Setting up in-cluster registry..."
 # Deploy in-cluster registry
-kubectl apply -f hack/vsa_generation_demo/in-cluster-registry.yaml
+kubectl apply -f hack/demos/in-cluster-registry.yaml
 
 # Wait for registry to be ready
 echo "  Waiting for in-cluster registry to be ready..."
@@ -144,7 +144,7 @@ echo "  In-cluster registry ready!"
 echo ""
 
 echo "🏗️ Step 2: Building test application..."
-cd hack/vsa_generation_demo/test-app
+cd hack/demos/test-app
 
 # Build and tag for external registry (for pushing)
 EXTERNAL_IMAGE_REF="${EXTERNAL_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
@@ -165,7 +165,7 @@ cd "${PROJECT_ROOT}"
 echo ""
 echo "🔑 Step 3: Generating signing keys..."
 # Generate proper Sigstore keys for this demo (non-interactive)
-DEMO_KEYS_DIR="hack/vsa_generation_demo"
+DEMO_KEYS_DIR="hack/demos"
 rm -f "${DEMO_KEYS_DIR}/vsa-complete-demo-keys.key" "${DEMO_KEYS_DIR}/vsa-complete-demo-keys.pub"
 cd "${DEMO_KEYS_DIR}"
 COSIGN_PASSWORD="" cosign generate-key-pair --output-key-prefix vsa-complete-demo-keys
@@ -268,7 +268,7 @@ kubectl apply \
 
 # Wait for CRDs
 echo "  Waiting for CRDs to be ready..."
-./hack/wait-for-resources.sh crd established 60s snapshots.appstudio.redhat.com releaseplans.appstudio.redhat.com releaseplanadmissions.appstudio.redhat.com enterprisecontractpolicies.appstudio.redhat.com > /dev/null
+./hack/demos/wait-for-resources.sh crd established 60s snapshots.appstudio.redhat.com releaseplans.appstudio.redhat.com releaseplanadmissions.appstudio.redhat.com enterprisecontractpolicies.appstudio.redhat.com > /dev/null
 
 # Apply the generate-vsa Tekton task (required for VSA generation)
 echo "  Installing generate-vsa Tekton task..."
@@ -282,7 +282,7 @@ echo "  Task runner RBAC installed"
 
 # Apply VSA demo specific resources
 echo "  Applying VSA demo resources..."
-kubectl apply -f hack/vsa_generation_demo/vsa-demo-resources.yaml
+kubectl apply -f hack/demos/vsa-demo-resources.yaml
 echo "  Demo resources configured"
 
 echo ""
