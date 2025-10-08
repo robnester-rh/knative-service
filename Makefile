@@ -51,10 +51,14 @@ setup-knative: ## Install and configure a kind cluster with knative installed
 	kn quickstart kind
 
 .PHONY: check-knative
-check-knative: ## Check if Knative is properly installed
+check-knative: ## Check if Knative and Tekton are properly installed and ready
 	@echo "Checking Knative installation..."
 	@kubectl get crd | grep "eventing" || (echo "Knative Eventing CRDs not found. Run 'make setup-knative' first." && exit 1)
-	@echo "Knative is properly installed!"
+	@echo "Checking Tekton installation..."
+	@kubectl get crd tasks.tekton.dev > /dev/null 2>&1 || (echo "Tekton CRDs not found. Installing..." && kubectl apply -f https://storage.googleapis.com/tekton-releases/pipeline/latest/release.yaml)
+	@echo "Waiting for Tekton to be ready..."
+	@kubectl wait --for=condition=ready pod -l app=tekton-pipelines-webhook -n tekton-pipelines --timeout=60s > /dev/null 2>&1 || echo "⚠️  Tekton webhook not ready yet, deployment may have timing issues"
+	@echo "Knative and Tekton are properly installed!"
 
 # === BUILD TARGETS ===
 .PHONY: build
