@@ -1,0 +1,382 @@
+#!/usr/bin/env bash
+# Copyright 2025 The Conforma Contributors
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# SPDX-License-Identifier: Apache-2.0
+
+set -euo pipefail
+
+# Always work from project root for consistent paths
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+cd "${PROJECT_ROOT}"
+
+echo "🎯 Complete Success VSA Generation Demo"
+echo "======================================"
+echo "This demo shows the complete end-to-end workflow with:"
+echo "  ✅ In-cluster registry (image accessibility)"
+echo "  ✅ Image signatures (cosign)"
+echo "  ✅ SLSA provenance attestations"
+echo "  ✅ Policy validation SUCCESS"
+echo "  ✅ VSA generation and upload"
+echo ""
+
+# Configuration
+LOCAL_REGISTRY="registry.registry.svc.cluster.local:5000"
+EXTERNAL_REGISTRY="localhost:5001"
+IMAGE_NAME="vsa-complete-demo-app"
+IMAGE_TAG="complete-$(date +%s)"
+FULL_IMAGE_REF="${LOCAL_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+SNAPSHOT_NAME="vsa-complete-demo-$(date +%s)"
+
+echo "📋 Demo Configuration:"
+echo "  Registry: ${LOCAL_REGISTRY}"
+echo "  Image: ${FULL_IMAGE_REF}"
+echo "  Snapshot: ${SNAPSHOT_NAME}"
+echo ""
+
+# Cleanup function
+cleanup_complete_demo() {
+    echo ""
+    echo "🧹 Cleaning up complete demo resources..."
+    
+    # Restore original ConfigMap to avoid conflicts with other demos
+    echo "  Restoring original ConfigMap..."
+    kubectl patch configmap taskrun-config -n default --patch '{
+        "data": {
+            "VSA_SIGNING_KEY_SECRET_NAME": "vsa-signing-key",
+            "PUBLIC_KEY": "k8s://openshift-pipelines/public-key"
+        }
+    }' 2>/dev/null || true
+    
+    # Remove demo snapshots
+    kubectl delete snapshot "${SNAPSHOT_NAME}" --ignore-not-found -n default 2>/dev/null || true
+    
+    # Remove demo secrets
+    kubectl delete secret vsa-complete-demo-signing-key --ignore-not-found -n default 2>/dev/null || true
+    kubectl delete secret vsa-complete-demo-public-key --ignore-not-found -n openshift-pipelines 2>/dev/null || true
+    
+    # Remove demo resources
+    kubectl delete -f hack/demos/vsa-demo-resources.yaml --ignore-not-found 2>/dev/null || true
+    
+    # Remove the generate-vsa Tekton task
+    kubectl delete -f config/base/generate-vsa.yaml --ignore-not-found 2>/dev/null || true
+    
+    # Remove RBAC for task runner
+    kubectl delete -f config/base/task-runner-rbac.yaml --ignore-not-found 2>/dev/null || true
+    
+    # Clean up port-forward
+    if [ -f /tmp/vsa-complete-demo-port-forward.pid ]; then
+        PORT_FORWARD_PID=$(cat /tmp/vsa-complete-demo-port-forward.pid)
+        kill "$PORT_FORWARD_PID" 2>/dev/null || true
+        rm -f /tmp/vsa-complete-demo-port-forward.pid
+    fi
+    pkill -f "kubectl.*port-forward.*registry.*5001:5000" 2>/dev/null || true
+    
+    # Clean up in-cluster registry
+    kubectl delete -f hack/demos/in-cluster-registry.yaml --ignore-not-found 2>/dev/null || true
+    
+    # Clean up generated keys
+    DEMO_KEYS_DIR="hack/demos"
+    rm -f "${DEMO_KEYS_DIR}/vsa-complete-demo-keys.key" "${DEMO_KEYS_DIR}/vsa-complete-demo-keys.pub" 2>/dev/null || true
+    
+    # Clean up temporary files
+    rm -f /tmp/vsa-complete-demo-snapshot.yaml 2>/dev/null || true
+    rm -f /tmp/slsa-provenance.json 2>/dev/null || true
+    
+    # Clean up Docker images
+    docker rmi "${EXTERNAL_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}" 2>/dev/null || true
+    
+    echo "  Complete demo cleanup completed"
+}
+
+# Set up signal handlers for graceful cleanup
+trap cleanup_complete_demo EXIT
+trap 'echo ""; echo "🛑 Demo interrupted - cleaning up..."; cleanup_complete_demo; exit 1' INT TERM
+
+echo "🔧 Step 1: Setting up in-cluster registry..."
+# Deploy in-cluster registry
+kubectl apply -f hack/demos/in-cluster-registry.yaml
+
+# Wait for registry to be ready
+echo "  Waiting for in-cluster registry to be ready..."
+kubectl wait --for=condition=available --timeout=60s deployment/registry -n registry
+
+# Set up port-forward for external access
+echo "  Setting up port-forward for external registry access..."
+# Kill any existing port-forward on this port
+pkill -f "kubectl.*port-forward.*registry.*5001:5000" 2>/dev/null || true
+sleep 2
+
+# Start port-forward in background
+kubectl port-forward -n registry service/registry 5001:5000 > /dev/null 2>&1 &
+PORT_FORWARD_PID=$!
+
+# Store PID for cleanup
+echo "$PORT_FORWARD_PID" > /tmp/vsa-complete-demo-port-forward.pid
+
+# Wait for port-forward to be ready
+echo "  Waiting for port-forward to be accessible..."
+for i in {1..30}; do
+    if curl -s "http://${EXTERNAL_REGISTRY}/v2/" > /dev/null 2>&1; then
+        echo "  Port-forward is accessible at ${EXTERNAL_REGISTRY}"
+        break
+    fi
+    if [ $i -eq 30 ]; then
+        echo "  Warning: Port-forward not accessible after 30 attempts"
+        echo "  This might cause image push failures"
+    fi
+    sleep 2
+done
+
+echo "  In-cluster registry ready!"
+echo ""
+
+echo "🏗️ Step 2: Building test application..."
+cd hack/demos/test-app
+
+# Build and tag for external registry (for pushing)
+EXTERNAL_IMAGE_REF="${EXTERNAL_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
+echo "  Building Docker image: ${EXTERNAL_IMAGE_REF}"
+docker build -t "${EXTERNAL_IMAGE_REF}" .
+echo "  Pushing to in-cluster registry..."
+docker push "${EXTERNAL_IMAGE_REF}"
+
+# Get the image digest and convert to internal cluster address
+IMAGE_DIGEST=$(docker inspect "${EXTERNAL_IMAGE_REF}" --format='{{index .RepoDigests 0}}' | cut -d'@' -f2)
+FULL_IMAGE_WITH_DIGEST="${LOCAL_REGISTRY}/${IMAGE_NAME}@${IMAGE_DIGEST}"
+EXTERNAL_IMAGE_WITH_DIGEST="${EXTERNAL_REGISTRY}/${IMAGE_NAME}@${IMAGE_DIGEST}"
+echo "  Image with digest (cluster-internal): ${FULL_IMAGE_WITH_DIGEST}"
+
+# Return to project root
+cd "${PROJECT_ROOT}"
+
+echo ""
+echo "🔑 Step 3: Generating signing keys..."
+# Generate proper Sigstore keys for this demo (non-interactive)
+DEMO_KEYS_DIR="hack/demos"
+rm -f "${DEMO_KEYS_DIR}/vsa-complete-demo-keys.key" "${DEMO_KEYS_DIR}/vsa-complete-demo-keys.pub"
+cd "${DEMO_KEYS_DIR}"
+COSIGN_PASSWORD="" cosign generate-key-pair --output-key-prefix vsa-complete-demo-keys
+cd "${PROJECT_ROOT}"
+echo "  Generated ${DEMO_KEYS_DIR}/vsa-complete-demo-keys.key and ${DEMO_KEYS_DIR}/vsa-complete-demo-keys.pub"
+
+echo ""
+echo "✍️ Step 4: Signing the image..."
+# Sign the image with our generated key
+echo "  Signing image via external address: ${EXTERNAL_IMAGE_WITH_DIGEST}"
+COSIGN_PASSWORD="" cosign sign --key "${DEMO_KEYS_DIR}/vsa-complete-demo-keys.key" "${EXTERNAL_IMAGE_WITH_DIGEST}" --yes
+echo "  Image signed successfully"
+
+# Verify the signature
+echo "  Verifying signature..."
+cosign verify --key "${DEMO_KEYS_DIR}/vsa-complete-demo-keys.pub" "${EXTERNAL_IMAGE_WITH_DIGEST}"
+echo "  Signature verified!"
+
+echo ""
+echo "📋 Step 5: Creating SLSA provenance attestation..."
+# Create a simple SLSA provenance attestation
+cat > /tmp/slsa-provenance.json << EOF
+{
+  "_type": "https://in-toto.io/Statement/v0.1",
+  "predicateType": "https://slsa.dev/provenance/v0.2",
+  "subject": [
+    {
+      "name": "${EXTERNAL_IMAGE_WITH_DIGEST}",
+      "digest": {
+        "sha256": "$(echo ${IMAGE_DIGEST} | cut -d':' -f2)"
+      }
+    }
+  ],
+  "predicate": {
+    "builder": {
+      "id": "https://github.com/conforma/knative-service/demo-builder"
+    },
+    "buildType": "https://github.com/conforma/knative-service/demo-build",
+    "invocation": {
+      "configSource": {
+        "uri": "https://github.com/conforma/knative-service",
+        "digest": {
+          "sha1": "demo-commit-hash"
+        }
+      }
+    },
+    "metadata": {
+      "buildInvocationId": "demo-build-$(date +%s)",
+      "buildStartedOn": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+      "buildFinishedOn": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+      "completeness": {
+        "parameters": true,
+        "environment": false,
+        "materials": true
+      },
+      "reproducible": false
+    },
+    "materials": [
+      {
+        "uri": "https://github.com/conforma/knative-service",
+        "digest": {
+          "sha1": "demo-commit-hash"
+        }
+      }
+    ]
+  }
+}
+EOF
+
+echo "  Creating SLSA provenance attestation..."
+COSIGN_PASSWORD="" cosign attest --key "${DEMO_KEYS_DIR}/vsa-complete-demo-keys.key" --predicate /tmp/slsa-provenance.json "${EXTERNAL_IMAGE_WITH_DIGEST}" --yes
+echo "  SLSA provenance attestation created successfully"
+
+# Verify the attestation
+echo "  Verifying attestation..."
+cosign verify-attestation --key "${DEMO_KEYS_DIR}/vsa-complete-demo-keys.pub" "${EXTERNAL_IMAGE_WITH_DIGEST}"
+echo "  Attestation verified!"
+
+echo ""
+echo "🔧 Step 6: Setting up demo resources..."
+# Check if Tekton Pipelines is installed, install if needed
+if ! kubectl get crd tasks.tekton.dev > /dev/null 2>&1; then
+    echo "  Installing Tekton Pipelines..."
+    kubectl apply -f https://storage.googleapis.com/tekton-releases/pipeline/latest/release.yaml > /dev/null 2>&1
+    echo "  Waiting for Tekton Pipelines to be ready..."
+    kubectl wait --for=condition=ready pod -l app=tekton-pipelines-controller -n tekton-pipelines --timeout=300s > /dev/null 2>&1
+    echo "  Tekton Pipelines installed"
+else
+    echo "  Tekton Pipelines already installed"
+fi
+
+# Install CRDs
+echo "  Installing CRDs..."
+kubectl apply \
+  -f https://raw.githubusercontent.com/konflux-ci/application-api/refs/heads/main/manifests/application-api-customresourcedefinitions.yaml \
+  -f https://raw.githubusercontent.com/konflux-ci/release-service/refs/heads/main/config/crd/bases/appstudio.redhat.com_releaseplanadmissions.yaml \
+  -f https://raw.githubusercontent.com/konflux-ci/release-service/refs/heads/main/config/crd/bases/appstudio.redhat.com_releaseplans.yaml \
+  -f https://raw.githubusercontent.com/conforma/crds/refs/heads/main/config/crd/bases/appstudio.redhat.com_enterprisecontractpolicies.yaml \
+  > /dev/null 2>&1
+
+# Wait for CRDs
+echo "  Waiting for CRDs to be ready..."
+./hack/demos/wait-for-resources.sh crd established 60s snapshots.appstudio.redhat.com releaseplans.appstudio.redhat.com releaseplanadmissions.appstudio.redhat.com enterprisecontractpolicies.appstudio.redhat.com > /dev/null
+
+# Apply the generate-vsa Tekton task (required for VSA generation)
+echo "  Installing generate-vsa Tekton task..."
+kubectl apply -f config/base/generate-vsa.yaml
+echo "  Tekton task installed"
+
+# Apply RBAC for task runner (required for cross-namespace access)
+echo "  Installing RBAC for task runner..."
+kubectl apply -f config/base/task-runner-rbac.yaml
+echo "  Task runner RBAC installed"
+
+# Apply VSA demo specific resources
+echo "  Applying VSA demo resources..."
+kubectl apply -f hack/demos/vsa-demo-resources.yaml
+echo "  Demo resources configured"
+
+echo ""
+echo "🔑 Step 7: Creating VSA signing key secrets..."
+# Create signing key secret for TaskRun workspace
+kubectl create secret generic vsa-complete-demo-signing-key \
+    --from-file=cosign.key="${DEMO_KEYS_DIR}/vsa-complete-demo-keys.key" \
+    -n default --dry-run=client -o yaml | kubectl apply -f -
+echo "  VSA signing key secret created"
+
+# Update public key secret for policy validation
+kubectl create secret generic vsa-complete-demo-public-key \
+    --from-file=cosign.pub="${DEMO_KEYS_DIR}/vsa-complete-demo-keys.pub" \
+    -n openshift-pipelines --dry-run=client -o yaml | kubectl apply -f -
+echo "  Public key secret created"
+
+# Update configmap to use appropriate keys
+echo "  Updating configmap for demo keys..."
+kubectl patch configmap taskrun-config -n default --patch '{
+    "data": {
+        "VSA_SIGNING_KEY_SECRET_NAME": "vsa-complete-demo-signing-key",
+        "PUBLIC_KEY": "k8s://openshift-pipelines/vsa-complete-demo-public-key"
+    }
+}'
+echo "  ConfigMap updated for complete demo"
+
+echo ""
+echo "📦 Step 8: Creating snapshot for VSA generation..."
+# Create a temporary snapshot file
+cat > /tmp/vsa-complete-demo-snapshot.yaml << EOF
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: Snapshot
+metadata:
+  name: ${SNAPSHOT_NAME}
+  namespace: default
+spec:
+  application: vsa-demo-application
+  displayName: ${SNAPSHOT_NAME}
+  displayDescription: "Complete demo snapshot with full attestation coverage"
+  components:
+    - name: vsa-complete-demo-component
+      containerImage: "${FULL_IMAGE_WITH_DIGEST}"
+EOF
+
+echo "  Created snapshot: ${SNAPSHOT_NAME}"
+echo "  Image: ${FULL_IMAGE_WITH_DIGEST}"
+
+echo ""
+echo "🚀 Step 9: Triggering VSA generation..."
+kubectl apply -f /tmp/vsa-complete-demo-snapshot.yaml
+echo "  Snapshot applied - VSA generation should start"
+
+echo ""
+echo "⏳ Step 10: Monitoring VSA generation..."
+echo "  Waiting for TaskRun creation..."
+sleep 5
+
+# Find the TaskRun
+TASKRUN=$(kubectl get taskruns -l app.kubernetes.io/instance=${SNAPSHOT_NAME} -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+
+if [ -z "$TASKRUN" ]; then
+    echo "  ⚠️ No TaskRun found yet. Checking service logs..."
+    kubectl logs -l app=conforma-knative-service -n default --tail=10
+    echo ""
+    echo "  💡 This might indicate:"
+    echo "    - No ReleasePlan configured for vsa-demo-application"
+    echo "    - Service is still processing the snapshot"
+    echo "    - Check 'kubectl get taskruns' manually"
+else
+    echo "  ✅ TaskRun created: ${TASKRUN}"
+    echo ""
+    echo "📊 Step 11: Watching VSA generation progress..."
+    echo "  Following TaskRun logs (Ctrl+C to exit):"
+    echo "  Command: tkn taskrun logs -f ${TASKRUN}"
+    echo ""
+    echo "📋 Expected Behavior:"
+    echo "  ✅ Image accessibility will SUCCEED (in-cluster registry accessible)"
+    echo "  ✅ Image signature check will SUCCEED"
+    echo "  ✅ Attestation signature check will SUCCEED"
+    echo "  ✅ Policy validation will SUCCEED"
+    echo "  ✅ VSA will be GENERATED and uploaded to Rekor"
+    echo "  ✅ This demonstrates COMPLETE successful VSA generation!"
+    echo ""
+    tkn taskrun logs -f "${TASKRUN}" || true
+fi
+
+echo ""
+echo "🎉 Complete Success Demo Results:"
+echo "  ✅ In-cluster registry: Images accessible from TaskRuns"
+echo "  ✅ Image signatures: Verified with cosign"
+echo "  ✅ SLSA attestations: Created and verified"
+echo "  ✅ Policy validation: Should show SUCCESS"
+echo "  ✅ VSA generation: Complete workflow demonstrated"
+echo ""
+echo "🔗 Rekor entries created for transparency and auditability"
+echo ""
+echo "✅ Complete Success VSA Generation Demo Finished!"

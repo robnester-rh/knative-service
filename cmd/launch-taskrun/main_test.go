@@ -140,11 +140,14 @@ func TestHandleCloudEvent_ValidSnapshot(t *testing.T) {
 
 	// Setup mocks using helper functions
 	configData := map[string]string{
-		"POLICY_CONFIGURATION":   "test-policy",
-		"PUBLIC_KEY_SECRET_NS":   "test-secret-ns",
-		"PUBLIC_KEY_SECRET_NAME": "test-secret-name",
-		"PUBLIC_KEY_SECRET_KEY":  "test-secret-key",
-		"PUBLIC_KEY":             "test-key",
+		"POLICY_CONFIGURATION":        "test-policy",
+		"PUBLIC_KEY_SECRET_NS":        "test-secret-ns",
+		"PUBLIC_KEY_SECRET_NAME":      "test-secret-name",
+		"PUBLIC_KEY_SECRET_KEY":       "test-secret-key",
+		"PUBLIC_KEY":                  "test-key",
+		"TASK_NAME":                   "generate-vsa",
+		"VSA_UPLOAD_URL":              "https://test-upload.example.com",
+		"VSA_SIGNING_KEY_SECRET_NAME": "test-vsa-key",
 	}
 	setupConfigMapMock(mockK8s, "test-namespace", configData)
 	setupSuccessfulECPLookupMocks(mockCrtlClient, "test-application", "test-namespace", "test-target")
@@ -315,9 +318,15 @@ func TestCreateTaskRun_Success(t *testing.T) {
 	}
 
 	config := &TaskRunConfig{
-		PolicyConfiguration: "test-policy",
-		PublicKey:           "test-key",
-		RekorHost:           "test-rekor",
+		PolicyConfiguration:     "test-policy",
+		PublicKey:               "test-key",
+		IgnoreRekor:             "true",
+		VsaSigningKeySecretName: "test-signing-key",
+		VsaUploadUrl:            "https://test-upload.example.com",
+		TaskName:                "generate-vsa",
+		Strict:                  "false",
+		Workers:                 "1",
+		Debug:                   "true",
 	}
 
 	// Setup mocks using helper functions
@@ -329,16 +338,10 @@ func TestCreateTaskRun_Success(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, taskRun)
 	assert.Equal(t, "test-namespace", taskRun.Namespace)
-	assert.Contains(t, taskRun.Name, "verify-enterprise-contract-test-snapshot-")
-	assert.Equal(t, tektonv1.ResolverName("bundles"), taskRun.Spec.TaskRef.Resolver)
-
-	// Check bundle resolver parameters
-	resolverParams := make(map[string]string)
-	for _, param := range taskRun.Spec.TaskRef.Params {
-		resolverParams[param.Name] = param.Value.StringVal
-	}
-	assert.Equal(t, "quay.io/conforma/tekton-task:latest", resolverParams["bundle"])
-	assert.Equal(t, "verify-enterprise-contract", resolverParams["name"])
+	assert.Contains(t, taskRun.Name, "verify-conforma-test-snapshot-")
+	assert.Equal(t, "generate-vsa", taskRun.Spec.TaskRef.Name)
+	assert.Equal(t, tektonv1.TaskKind("Task"), taskRun.Spec.TaskRef.Kind)
+	assert.Equal(t, "tekton.dev/v1", taskRun.Spec.TaskRef.APIVersion)
 
 	// Check parameters
 	params := make(map[string]string)
@@ -349,9 +352,9 @@ func TestCreateTaskRun_Success(t *testing.T) {
 	assert.Equal(t, "test-target/test-ecp-policy", params["POLICY_CONFIGURATION"])
 	assert.Equal(t, "test-key", params["PUBLIC_KEY"])
 	assert.Equal(t, "true", params["IGNORE_REKOR"])
-	assert.Equal(t, "true", params["STRICT"])
-	assert.Equal(t, "true", params["INFO"])
-	assert.Equal(t, "true", params["show-successes"])
+	assert.Equal(t, "false", params["STRICT"])
+	assert.Equal(t, "https://test-upload.example.com", params["VSA_UPLOAD_URL"])
+	assert.Equal(t, "true", params["DEBUG"])
 	assert.Equal(t, "1", params["WORKERS"])
 	assert.Contains(t, params["IMAGES"], "test-app")
 	assert.Contains(t, params["IMAGES"], "test-component")
@@ -375,13 +378,15 @@ func TestCreateTaskRun_InvalidSpec(t *testing.T) {
 
 	config := &TaskRunConfig{
 		PolicyConfiguration: "test-policy",
+		TaskName:            "generate-vsa",
+		VsaUploadUrl:        "https://test-upload.example.com",
 	}
 
 	taskRun, err := service.createTaskRun(snapshot, config)
 
 	assert.Error(t, err)
 	assert.Nil(t, taskRun)
-	assert.Contains(t, err.Error(), "failed to marshal snapshot spec")
+	assert.Contains(t, err.Error(), "failed to unmarshal snapshot spec")
 }
 
 func TestProcessSnapshot_Success(t *testing.T) {
@@ -402,11 +407,14 @@ func TestProcessSnapshot_Success(t *testing.T) {
 
 	// Setup mocks using helper functions
 	configData := map[string]string{
-		"POLICY_CONFIGURATION":   "test-policy",
-		"PUBLIC_KEY_SECRET_NS":   "test-secret-ns",
-		"PUBLIC_KEY_SECRET_NAME": "test-secret-name",
-		"PUBLIC_KEY_SECRET_KEY":  "test-secret-key",
-		"PUBLIC_KEY":             "test-key",
+		"POLICY_CONFIGURATION":        "test-policy",
+		"PUBLIC_KEY_SECRET_NS":        "test-secret-ns",
+		"PUBLIC_KEY_SECRET_NAME":      "test-secret-name",
+		"PUBLIC_KEY_SECRET_KEY":       "test-secret-key",
+		"PUBLIC_KEY":                  "test-key",
+		"TASK_NAME":                   "generate-vsa",
+		"VSA_UPLOAD_URL":              "https://test-upload.example.com",
+		"VSA_SIGNING_KEY_SECRET_NAME": "test-vsa-key",
 	}
 	setupConfigMapMock(mockK8s, "test-namespace", configData)
 	setupSuccessfulECPLookupMocks(mockCrtlClient, "test-application", "test-namespace", "test-target")
@@ -471,6 +479,8 @@ func TestProcessSnapshot_NoECP(t *testing.T) {
 	// Setup mocks using helper functions
 	configData := map[string]string{
 		"POLICY_CONFIGURATION": "test-policy",
+		"TASK_NAME":            "generate-vsa",
+		"VSA_UPLOAD_URL":       "https://test-upload.example.com",
 	}
 	setupConfigMapMock(mockK8s, "test-namespace", configData)
 	setupECPLookupFailureMock(mockCrtlClient)

@@ -17,55 +17,55 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: conforma-knative-service
-  namespace: default # Change as needed
+  name: conforma-vsa-generator
+  namespace: default
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: conforma-knative-service
-  namespace: default # Change as needed
+  name: conforma-vsa-generator
+  namespace: default
 rules:
-  - apiGroups: [""]
-    resources: ["configmaps"]
-    verbs: ["get", "list"]
   - apiGroups: ["tekton.dev"]
     resources: ["taskruns"]
-    verbs: ["create"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["tekton.dev"]
+    resources: ["tasks"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: conforma-knative-service
-  namespace: default # Change as needed
+  name: conforma-vsa-generator
+  namespace: default
 subjects:
   - kind: ServiceAccount
-    name: conforma-knative-service
+    name: conforma-vsa-generator
+    namespace: default
 roleRef:
   kind: Role
-  name: conforma-knative-service
+  name: conforma-vsa-generator
   apiGroup: rbac.authorization.k8s.io
 ---
-# ClusterRole for cross-namespace access to ReleasePlanAdmissions
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: conforma-knative-service-cluster
-rules:
-  - apiGroups: ["appstudio.redhat.com"]
-    resources: ["snapshots", "releaseplans", "releaseplanadmissions", "enterprisecontractpolicies"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["get", "list", "watch"]
----
+# ClusterRoleBinding to reuse existing knative service ClusterRole
+# The TaskRun needs enterprisecontractpolicies and secrets access,
+# which are already included in conforma-knative-service-cluster
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: conforma-knative-service-cluster
+  name: conforma-vsa-generator-cluster
 subjects:
   - kind: ServiceAccount
-    name: conforma-knative-service
+    name: conforma-vsa-generator
     namespace: default
 roleRef:
   kind: ClusterRole
