@@ -26,9 +26,6 @@ metadata:
   name: conforma-vsa-generator
   namespace: default
 rules:
-  - apiGroups: ["appstudio.redhat.com"]
-    resources: ["enterprisecontractpolicies"]
-    verbs: ["get", "list", "watch"]
   - apiGroups: ["tekton.dev"]
     resources: ["taskruns"]
     verbs: ["get", "list", "watch", "create", "update", "patch"]
@@ -59,19 +56,9 @@ roleRef:
   name: conforma-vsa-generator
   apiGroup: rbac.authorization.k8s.io
 ---
-# ClusterRole for cross-namespace access to EnterpriseContractPolicies
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: conforma-vsa-generator-cluster
-rules:
-  - apiGroups: ["appstudio.redhat.com"]
-    resources: ["enterprisecontractpolicies"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["get", "list", "watch"]
----
+# ClusterRoleBinding to reuse existing knative service ClusterRole
+# The TaskRun needs enterprisecontractpolicies and secrets access,
+# which are already included in conforma-knative-service-cluster
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
@@ -82,5 +69,5 @@ subjects:
     namespace: default
 roleRef:
   kind: ClusterRole
-  name: conforma-vsa-generator-cluster
+  name: conforma-knative-service-cluster
   apiGroup: rbac.authorization.k8s.io
