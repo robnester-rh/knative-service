@@ -16,9 +16,13 @@
 
 FROM alpine:latest
 
-# Create a simple test application
+# Build argument to ensure unique image digest each build
+ARG BUILD_ID=unknown
+
+# Create a simple application script with build ID
 RUN echo '#!/bin/sh' > /app.sh && \
     echo 'echo "=== VSA Generation Demo Application ==="' >> /app.sh && \
+    echo 'echo "Build ID: '"${BUILD_ID}"'"' >> /app.sh && \
     echo 'echo "Image: $(hostname)"' >> /app.sh && \
     echo 'echo "Timestamp: $(date)"' >> /app.sh && \
     echo 'echo "This image was built to demonstrate VSA generation"' >> /app.sh && \
@@ -28,10 +32,5 @@ RUN echo '#!/bin/sh' > /app.sh && \
     echo 'done' >> /app.sh && \
     chmod +x /app.sh
 
-# Add some metadata for demonstration
-LABEL maintainer="conforma-team"
-LABEL purpose="vsa-generation-demo"
-LABEL version="1.0.0"
-
-EXPOSE 8080
 CMD ["/app.sh"]
+
