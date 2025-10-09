@@ -60,6 +60,9 @@ metadata:
 spec:
   description: "VSA Generation Demo Policy - Less strict for demo purposes"
   publicKey: "k8s://openshift-pipelines/vsa-demo-public-key"
+  configuration:
+    include:
+      - "github.com/enterprise-contract/config//slsa3"
 ---
 # Public key secret for VSA demo (will be updated by script)
 apiVersion: v1
@@ -71,3 +74,4 @@ type: Opaque
 data:
   # This will be populated by the demo script with the generated public key
   cosign.pub: ""
+
