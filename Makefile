@@ -48,7 +48,8 @@ setup-knative: ## Install and configure a kind cluster with knative installed
 	@# Nuke the existing cluster if it exists
 	kind delete cluster -n knative
 	@# Create a new one
-	kn quickstart kind
+	@# We need eventing but we need don't need serving
+	kn quickstart kind --install-eventing
 
 .PHONY: check-knative
 check-knative: ## Check if Knative and Tekton are properly installed and ready
