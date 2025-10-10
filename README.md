@@ -84,7 +84,7 @@ metadata:
   name: taskrun-config
   namespace: default
 data:
-  POLICY_CONFIGURATION: "github.com/enterprise-contract/config//slsa3"
+  POLICY_CONFIGURATION: "github.com/conforma/config//slsa3"
   PUBLIC_KEY: |
     -----BEGIN PUBLIC KEY-----
     MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEZP/0htjhVt2y0ohjgtIIgICOtQtA

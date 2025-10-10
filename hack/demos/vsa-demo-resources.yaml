@@ -62,7 +62,7 @@ spec:
   publicKey: "k8s://openshift-pipelines/vsa-demo-public-key"
   configuration:
     include:
-      - "github.com/enterprise-contract/config//slsa3"
+      - "github.com/conforma/config//slsa3"
 ---
 # Public key secret for VSA demo (will be updated by script)
 apiVersion: v1
