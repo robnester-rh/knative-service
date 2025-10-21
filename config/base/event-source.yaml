@@ -21,6 +21,7 @@ metadata:
 spec:
   serviceAccountName: conforma-knative-service
   mode: Resource
+  namespaces: []  # Watch all namespaces
   resources:
     - apiVersion: appstudio.redhat.com/v1alpha1
       kind: Snapshot
