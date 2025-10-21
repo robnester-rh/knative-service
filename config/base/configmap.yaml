@@ -21,7 +21,7 @@ metadata:
   namespace: default # Change as needed
 
 data:
-  POLICY_CONFIGURATION: "github.com/enterprise-contract/config//slsa3"
+  POLICY_CONFIGURATION: "github.com/conforma/config//slsa3"
   PUBLIC_KEY: "k8s://openshift-pipelines/public-key"
   IGNORE_REKOR: "true"
   VSA_SIGNING_KEY_SECRET_NAME: "vsa-signing-key"
