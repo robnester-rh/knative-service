@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"testing"
 	"time"
 
@@ -101,6 +102,9 @@ func (m *mockCloudEventsClient) StartReceiver(ctx context.Context, fn interface{
 }
 
 func TestHandleCloudEvent_ValidSnapshot(t *testing.T) {
+	os.Setenv("POD_NAMESPACE", "test-namespace")
+	defer os.Unsetenv("POD_NAMESPACE")
+
 	// Setup mocks
 	mockK8s := &mockK8sClient{}
 	mockTekton := &mockTektonClient{}
@@ -333,15 +337,22 @@ func TestCreateTaskRun_Success(t *testing.T) {
 	setupSuccessfulECPLookupMocks(mockCrtlClient, "test-app", "test-namespace", "test-target")
 	setupPublicKeySecretNotFoundMock(mockCrtlClient, "openshift-pipelines", "public-key")
 
-	taskRun, err := service.createTaskRun(snapshot, config)
+	taskRun, err := service.createTaskRun(snapshot, config, "test-namespace")
 
 	assert.NoError(t, err)
 	assert.NotNil(t, taskRun)
 	assert.Equal(t, "test-namespace", taskRun.Namespace)
 	assert.Contains(t, taskRun.Name, "verify-conforma-test-snapshot-")
-	assert.Equal(t, "generate-vsa", taskRun.Spec.TaskRef.Name)
-	assert.Equal(t, tektonv1.TaskKind("Task"), taskRun.Spec.TaskRef.Kind)
-	assert.Equal(t, "tekton.dev/v1", taskRun.Spec.TaskRef.APIVersion)
+
+	// Verify resolver configuration
+	assert.Equal(t, tektonv1.ResolverName("cluster"), taskRun.Spec.TaskRef.Resolver)
+	resolverParams := make(map[string]string)
+	for _, param := range taskRun.Spec.TaskRef.Params {
+		resolverParams[param.Name] = param.Value.StringVal
+	}
+	assert.Equal(t, "task", resolverParams["kind"])
+	assert.Equal(t, "generate-vsa", resolverParams["name"])
+	assert.Equal(t, "test-namespace", resolverParams["namespace"])
 
 	// Check parameters
 	params := make(map[string]string)
@@ -382,7 +393,7 @@ func TestCreateTaskRun_InvalidSpec(t *testing.T) {
 		VsaUploadUrl:        "https://test-upload.example.com",
 	}
 
-	taskRun, err := service.createTaskRun(snapshot, config)
+	taskRun, err := service.createTaskRun(snapshot, config, "test-namespace")
 
 	assert.Error(t, err)
 	assert.Nil(t, taskRun)
@@ -390,6 +401,9 @@ func TestCreateTaskRun_InvalidSpec(t *testing.T) {
 }
 
 func TestProcessSnapshot_Success(t *testing.T) {
+	os.Setenv("POD_NAMESPACE", "test-namespace")
+	defer os.Unsetenv("POD_NAMESPACE")
+
 	mockK8s := &mockK8sClient{}
 	mockTekton := &mockTektonClient{}
 	mockCrtlClient := &mockControllerRuntimeClient{}
@@ -429,6 +443,9 @@ func TestProcessSnapshot_Success(t *testing.T) {
 }
 
 func TestProcessSnapshot_ConfigMapError(t *testing.T) {
+	os.Setenv("POD_NAMESPACE", "test-namespace")
+	defer os.Unsetenv("POD_NAMESPACE")
+
 	mockK8s := &mockK8sClient{}
 	mockTekton := &mockTektonClient{}
 	mockCrtlClient := &mockControllerRuntimeClient{}
@@ -461,6 +478,9 @@ func TestProcessSnapshot_ConfigMapError(t *testing.T) {
 }
 
 func TestProcessSnapshot_NoECP(t *testing.T) {
+	os.Setenv("POD_NAMESPACE", "test-namespace")
+	defer os.Unsetenv("POD_NAMESPACE")
+
 	mockK8s := &mockK8sClient{}
 	mockTekton := &mockTektonClient{}
 	mockCrtlClient := &mockControllerRuntimeClient{}
