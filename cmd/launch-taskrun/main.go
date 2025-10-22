@@ -347,14 +347,19 @@ func (s *Service) processSnapshot(ctx context.Context, snapshot *konflux.Snapsho
 	startTime := time.Now()
 	s.logger.Info("Starting to process snapshot", gozap.String("name", snapshot.Name), gozap.String("namespace", snapshot.Namespace))
 
-	config, err := s.readConfigMap(ctx, snapshot.Namespace)
+	// Read service namespace from environment variable
+	configNamespace := os.Getenv("POD_NAMESPACE")
+	if configNamespace == "" {
+		configNamespace = "default" // Fallback for local dev/testing.
+	}
+
+	config, err := s.readConfigMap(ctx, configNamespace)
 	if err != nil {
 		s.logger.Error(err, "Failed to read configmap")
 		return fmt.Errorf("failed to read configmap: %w", err)
 	}
-	s.logger.Info("Successfully read configmap", gozap.String("namespace", snapshot.Namespace))
-
-	taskRun, err := s.createTaskRun(snapshot, config)
+	s.logger.Info("Successfully read configmap", gozap.String("namespace", configNamespace))
+	taskRun, err := s.createTaskRun(snapshot, config, configNamespace)
 	if err != nil {
 		s.logger.Error(err, "Failed to create taskrun")
 		return fmt.Errorf("failed to create taskrun: %w", err)
@@ -617,7 +622,7 @@ func (s *Service) findEcp(snapshot *konflux.Snapshot) (string, error) {
 	return konflux.FindEnterpriseContractPolicy(ctx, s.crtlClient, s.logger, snapshot)
 }
 
-func (s *Service) createTaskRun(snapshot *konflux.Snapshot, config *TaskRunConfig) (*tektonv1.TaskRun, error) {
+func (s *Service) createTaskRun(snapshot *konflux.Snapshot, config *TaskRunConfig, taskNamespace string) (*tektonv1.TaskRun, error) {
 	// Validate required fields
 	if config.TaskName == "" {
 		return nil, fmt.Errorf("TASK_NAME is required but not set in configmap")
@@ -709,9 +714,14 @@ func (s *Service) createTaskRun(snapshot *konflux.Snapshot, config *TaskRunConfi
 		},
 		Spec: tektonv1.TaskRunSpec{
 			TaskRef: &tektonv1.TaskRef{
-				Kind:       "Task",
-				Name:       config.TaskName,
-				APIVersion: "tekton.dev/v1",
+				ResolverRef: tektonv1.ResolverRef{
+					Resolver: "cluster",
+					Params: tektonv1.Params{
+						{Name: "kind", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: "task"}},
+						{Name: "name", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: config.TaskName}},
+						{Name: "namespace", Value: tektonv1.ParamValue{Type: tektonv1.ParamTypeString, StringVal: taskNamespace}},
+					},
+				},
 			},
 			Params:             params,
 			ServiceAccountName: "conforma-vsa-generator",

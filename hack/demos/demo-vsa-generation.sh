@@ -25,6 +25,7 @@ cd "${PROJECT_ROOT}"
 echo "🎯 VSA Generation Demo"
 echo "======================"
 echo "This demo shows the complete end-to-end workflow with:"
+echo "  ✅ Cross-namespace Snapshot watching"
 echo "  ✅ In-cluster registry (image accessibility)"
 echo "  ✅ Image signatures (cosign)"
 echo "  ✅ SLSA provenance attestations"
@@ -39,11 +40,13 @@ IMAGE_NAME="vsa-demo-app"
 IMAGE_TAG="demo-$(date +%s)"
 FULL_IMAGE_REF="${LOCAL_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
 SNAPSHOT_NAME="vsa-demo-$(date +%s)"
+USER_NAMESPACE="demo-user-namespace"
 
 echo "📋 Demo Configuration:"
 echo "  Registry: ${LOCAL_REGISTRY}"
 echo "  Image: ${FULL_IMAGE_REF}"
 echo "  Snapshot: ${SNAPSHOT_NAME}"
+echo "  User Namespace: ${USER_NAMESPACE} (demonstrating cross-namespace watching)"
 echo ""
 
 # Cleanup function
@@ -60,11 +63,13 @@ cleanup_demo() {
         }
     }' 2>/dev/null || true
     
-    # Remove demo snapshots
-    kubectl delete snapshot "${SNAPSHOT_NAME}" --ignore-not-found -n default 2>/dev/null || true
+    # Remove demo snapshots and user namespace
+    kubectl delete snapshot "${SNAPSHOT_NAME}" --ignore-not-found -n "${USER_NAMESPACE}" 2>/dev/null || true
+    kubectl delete namespace "${USER_NAMESPACE}" --ignore-not-found 2>/dev/null || true
     
     # Remove demo secrets
     kubectl delete secret vsa-demo-signing-key --ignore-not-found -n default 2>/dev/null || true
+    kubectl delete secret vsa-demo-signing-key --ignore-not-found -n "${USER_NAMESPACE}" 2>/dev/null || true
     kubectl delete secret vsa-demo-public-key --ignore-not-found -n openshift-pipelines 2>/dev/null || true
     
     # Remove demo resources
@@ -73,8 +78,15 @@ cleanup_demo() {
     # Remove the generate-vsa Tekton task
     kubectl delete -f config/base/generate-vsa.yaml --ignore-not-found 2>/dev/null || true
     
-    # Remove RBAC for task runner
-    kubectl delete -f config/base/task-runner-rbac.yaml --ignore-not-found 2>/dev/null || true
+    # Remove RBAC for task runner from user namespace
+    kubectl delete serviceaccount conforma-vsa-generator -n "${USER_NAMESPACE}" --ignore-not-found 2>/dev/null || true
+    kubectl delete role conforma-vsa-generator -n "${USER_NAMESPACE}" --ignore-not-found 2>/dev/null || true
+    kubectl delete role conforma-vsa-generator-pods -n "${USER_NAMESPACE}" --ignore-not-found 2>/dev/null || true
+    kubectl delete role conforma-vsa-generator-secrets -n "${USER_NAMESPACE}" --ignore-not-found 2>/dev/null || true
+    kubectl delete rolebinding conforma-vsa-generator -n "${USER_NAMESPACE}" --ignore-not-found 2>/dev/null || true
+    kubectl delete rolebinding conforma-vsa-generator-pods -n "${USER_NAMESPACE}" --ignore-not-found 2>/dev/null || true
+    kubectl delete rolebinding conforma-vsa-generator-secrets -n "${USER_NAMESPACE}" --ignore-not-found 2>/dev/null || true
+    kubectl delete clusterrolebinding conforma-vsa-generator-cluster-demo --ignore-not-found 2>/dev/null || true
     
     # Clean up port-forward
     if [ -f /tmp/vsa-demo-port-forward.pid ]; then
@@ -247,7 +259,14 @@ cosign verify-attestation --key "${DEMO_KEYS_DIR}/vsa-demo-keys.pub" "${EXTERNAL
 echo "  Attestation verified!"
 
 echo ""
-echo "🔧 Step 6: Setting up demo resources..."
+echo "🔧 Step 6: Creating user namespace for demo..."
+# Create user namespace early so we can create resources in it
+echo "  Creating user namespace: ${USER_NAMESPACE}"
+kubectl create namespace "${USER_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+echo "  User namespace created"
+
+echo ""
+echo "🔧 Step 7: Setting up demo resources..."
 # Check if Tekton Pipelines is installed, install if needed
 if ! kubectl get crd tasks.tekton.dev > /dev/null 2>&1; then
     echo "  Installing Tekton Pipelines..."
@@ -288,27 +307,69 @@ echo "  Waiting for CRDs to be ready..."
 /tmp/wait-for-crds.sh crd established 60s snapshots.appstudio.redhat.com releaseplans.appstudio.redhat.com releaseplanadmissions.appstudio.redhat.com enterprisecontractpolicies.appstudio.redhat.com > /dev/null
 rm -f /tmp/wait-for-crds.sh
 
-# Apply the generate-vsa Tekton task (required for VSA generation)
+# Apply the generate-vsa Tekton task in default namespace (used via cluster resolver)
 echo "  Installing generate-vsa Tekton task..."
 kubectl apply -f config/base/generate-vsa.yaml
-echo "  Tekton task installed"
+echo "  Tekton task installed (accessible via cluster resolver)"
 
 # Apply RBAC for task runner (required for cross-namespace access)
-echo "  Installing RBAC for task runner..."
-kubectl apply -f config/base/task-runner-rbac.yaml
+echo "  Installing RBAC for task runner in user namespace..."
+# Create service account, role, and rolebinding in user namespace
+kubectl create serviceaccount conforma-vsa-generator -n "${USER_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+kubectl create role conforma-vsa-generator -n "${USER_NAMESPACE}" \
+  --verb=get,list,watch,create,update,patch --resource=taskruns,tasks --resource-name='' \
+  --dry-run=client -o yaml | kubectl apply -f -
+kubectl create role conforma-vsa-generator-pods -n "${USER_NAMESPACE}" \
+  --verb=get,list,watch,create,update,patch --resource=pods --resource-name='' \
+  --dry-run=client -o yaml | kubectl apply -f -
+kubectl create role conforma-vsa-generator-secrets -n "${USER_NAMESPACE}" \
+  --verb=get,list --resource=secrets --resource-name='' \
+  --dry-run=client -o yaml | kubectl apply -f -
+kubectl create rolebinding conforma-vsa-generator -n "${USER_NAMESPACE}" \
+  --role=conforma-vsa-generator --serviceaccount="${USER_NAMESPACE}:conforma-vsa-generator" \
+  --dry-run=client -o yaml | kubectl apply -f -
+kubectl create rolebinding conforma-vsa-generator-pods -n "${USER_NAMESPACE}" \
+  --role=conforma-vsa-generator-pods --serviceaccount="${USER_NAMESPACE}:conforma-vsa-generator" \
+  --dry-run=client -o yaml | kubectl apply -f -
+kubectl create rolebinding conforma-vsa-generator-secrets -n "${USER_NAMESPACE}" \
+  --role=conforma-vsa-generator-secrets --serviceaccount="${USER_NAMESPACE}:conforma-vsa-generator" \
+  --dry-run=client -o yaml | kubectl apply -f -
+# Create ClusterRoleBinding
+kubectl create clusterrolebinding conforma-vsa-generator-cluster-demo \
+  --clusterrole=conforma-knative-service-cluster \
+  --serviceaccount="${USER_NAMESPACE}:conforma-vsa-generator" \
+  --dry-run=client -o yaml | kubectl apply -f -
 echo "  Task runner RBAC installed"
 
 # Apply VSA demo specific resources
 echo "  Applying VSA demo resources..."
 kubectl apply -f hack/demos/vsa-demo-resources.yaml
+
+# Create ReleasePlan in the user namespace (overriding the one from vsa-demo-resources.yaml)
+echo "  Creating ReleasePlan in user namespace: ${USER_NAMESPACE}"
+cat <<EOF | kubectl apply -f -
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: ReleasePlan
+metadata:
+  name: vsa-demo-release-plan
+  namespace: ${USER_NAMESPACE}
+  labels:
+    release.appstudio.openshift.io/releasePlanAdmission: vsa-demo-rpa
+spec:
+  application: vsa-demo-application
+  target: rhtap-releng-tenant
+EOF
 echo "  Demo resources configured"
 
 echo ""
-echo "🔑 Step 7: Creating VSA signing key secrets..."
-# Create signing key secret for TaskRun workspace
+echo "🔑 Step 8: Creating VSA signing key secrets..."
+# Create signing key secret for TaskRun workspace in both default and user namespace
 kubectl create secret generic vsa-demo-signing-key \
     --from-file=cosign.key="${DEMO_KEYS_DIR}/vsa-demo-keys.key" \
     -n default --dry-run=client -o yaml | kubectl apply -f -
+kubectl create secret generic vsa-demo-signing-key \
+    --from-file=cosign.key="${DEMO_KEYS_DIR}/vsa-demo-keys.key" \
+    -n "${USER_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
 echo "  VSA signing key secret created"
 
 # Update public key secret for policy validation
@@ -327,55 +388,58 @@ kubectl patch configmap taskrun-config -n default --patch '{
 echo "  ConfigMap updated for demo"
 
 echo ""
-echo "📦 Step 8: Creating snapshot for VSA generation..."
+echo "📦 Step 9: Creating snapshot for VSA generation..."
 # Create a temporary snapshot file
 cat > /tmp/vsa-demo-snapshot.yaml << EOF
 apiVersion: appstudio.redhat.com/v1alpha1
 kind: Snapshot
 metadata:
   name: ${SNAPSHOT_NAME}
-  namespace: default
+  namespace: ${USER_NAMESPACE}
 spec:
   application: vsa-demo-application
   displayName: ${SNAPSHOT_NAME}
-  displayDescription: "Demo snapshot with full attestation coverage"
+  displayDescription: "Demo snapshot with full attestation coverage (cross-namespace)"
   components:
     - name: vsa-demo-component
       containerImage: "${FULL_IMAGE_WITH_DIGEST}"
 EOF
 
 echo "  Created snapshot: ${SNAPSHOT_NAME}"
+echo "  Namespace: ${USER_NAMESPACE}"
 echo "  Image: ${FULL_IMAGE_WITH_DIGEST}"
+echo "  📍 Note: Service runs in 'default' namespace, Snapshot in '${USER_NAMESPACE}'"
 
 echo ""
-echo "🚀 Step 9: Triggering VSA generation..."
+echo "🚀 Step 10: Triggering VSA generation..."
 kubectl apply -f /tmp/vsa-demo-snapshot.yaml
 echo "  Snapshot applied - VSA generation should start"
 
 echo ""
-echo "⏳ Step 10: Monitoring VSA generation..."
-echo "  Waiting for TaskRun creation..."
+echo "⏳ Step 11: Monitoring VSA generation..."
+echo "  Waiting for TaskRun creation in ${USER_NAMESPACE}..."
 sleep 5
 
-# Find the TaskRun
-TASKRUN=$(kubectl get taskruns -l app.kubernetes.io/instance=${SNAPSHOT_NAME} -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+# Find the TaskRun (will be created in the same namespace as the Snapshot)
+TASKRUN=$(kubectl get taskruns -n "${USER_NAMESPACE}" -l app.kubernetes.io/instance=${SNAPSHOT_NAME} -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
 
 if [ -z "$TASKRUN" ]; then
     echo "  ⚠️ No TaskRun found yet. Checking service logs..."
     kubectl logs -l app=conforma-knative-service -n default --tail=20
     echo ""
     echo "  💡 This might indicate:"
-    echo "    - No ReleasePlan configured for vsa-demo-application"
+    echo "    - Cross-namespace event not received (check ApiServerSource config)"
+    echo "    - No ReleasePlan configured for vsa-demo-application in ${USER_NAMESPACE}"
     echo "    - Service is still processing the snapshot"
-    echo "    - Check 'kubectl get taskruns' manually"
+    echo "    - Check 'kubectl get taskruns -n ${USER_NAMESPACE}' and service logs"
 else
     echo "  ✅ TaskRun created: ${TASKRUN}"
     echo ""
-    echo "📊 Step 11: Watching VSA generation progress..."
-    echo "  Following TaskRun logs (Ctrl+C to exit):"
-    echo "  Command: tkn taskrun logs -f ${TASKRUN}"
+    echo "📊 Step 12: Watching VSA generation progress..."
+    echo "  Waiting for TaskRun to complete..."
     echo ""
     echo "📋 Expected Behavior:"
+    echo "  ✅ Cross-namespace event detected (Snapshot in ${USER_NAMESPACE}, Service in default)"
     echo "  ✅ Image accessibility will SUCCEED (in-cluster registry accessible)"
     echo "  ✅ Image signature check will SUCCEED"
     echo "  ✅ Attestation signature check will SUCCEED"
@@ -383,11 +447,19 @@ else
     echo "  ✅ VSA will be GENERATED and uploaded to Rekor"
     echo "  ✅ This demonstrates the complete VSA generation workflow!"
     echo ""
-    tkn taskrun logs -f "${TASKRUN}" || true
+    
+    # Wait for TaskRun to complete (avoid tkn CLI race condition)
+    kubectl wait --for=condition=Succeeded --timeout=120s taskrun/${TASKRUN} -n ${USER_NAMESPACE} 2>/dev/null || true
+    
+    # Get logs after completion (no -f flag to avoid race condition)
+    echo "TaskRun logs:"
+    kubectl logs -l tekton.dev/taskRun=${TASKRUN} -n ${USER_NAMESPACE} --tail=50 2>/dev/null || \
+        echo "  (TaskRun completed too quickly - check with: kubectl logs -l tekton.dev/taskRun=${TASKRUN} -n ${USER_NAMESPACE})"
 fi
 
 echo ""
 echo "🎉 VSA Generation Demo Results:"
+echo "  ✅ Cross-namespace watching: Snapshot in ${USER_NAMESPACE}, Service in default"
 echo "  ✅ In-cluster registry: Images accessible from TaskRuns"
 echo "  ✅ Image signatures: Verified with cosign"
 echo "  ✅ SLSA attestations: Created and verified"
@@ -395,6 +467,10 @@ echo "  ✅ Policy validation: Executed"
 echo "  ✅ VSA generation: Complete workflow demonstrated"
 echo ""
 echo "🔗 Rekor entries created for transparency and auditability"
+echo ""
+echo "💡 Key Demonstration:"
+echo "  The ApiServerSource (in default namespace) successfully detected and processed"
+echo "  a Snapshot created in ${USER_NAMESPACE}, demonstrating cross-namespace capability!"
 echo ""
 echo "✅ VSA Generation Demo Finished!"
 
