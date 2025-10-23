@@ -391,7 +391,7 @@ func (s *Service) processSnapshot(ctx context.Context, snapshot *konflux.Snapsho
 		defer cancel()
 
 		var createErr error
-		createdTaskRun, createErr = s.tektonClient.TektonV1().TaskRuns(snapshot.Namespace).Create(trCtx, taskRun, metav1.CreateOptions{})
+		createdTaskRun, createErr = s.tektonClient.TektonV1().TaskRuns(configNamespace).Create(trCtx, taskRun, metav1.CreateOptions{})
 		return createErr
 	})
 	if err != nil {
