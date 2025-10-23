@@ -350,7 +350,10 @@ func (s *Service) processSnapshot(ctx context.Context, snapshot *konflux.Snapsho
 	// Read service namespace from environment variable
 	configNamespace := os.Getenv("POD_NAMESPACE")
 	if configNamespace == "" {
-		configNamespace = "default" // Fallback for local dev/testing.
+		configNamespace = "default"
+		s.logger.Info("Falling back to default namespace", gozap.String("namespace", configNamespace))
+	} else {
+		s.logger.Info("Using POD_NAMESPACE env var for namespace", gozap.String("namespace", configNamespace))
 	}
 
 	config, err := s.readConfigMap(ctx, configNamespace)
