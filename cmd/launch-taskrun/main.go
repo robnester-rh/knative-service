@@ -703,7 +703,7 @@ func (s *Service) createTaskRun(snapshot *konflux.Snapshot, config *TaskRunConfi
 	return &tektonv1.TaskRun{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("verify-conforma-%s-%d", snapshot.Name, time.Now().Unix()),
-			Namespace: snapshot.Namespace,
+			Namespace: taskNamespace,
 			Labels: map[string]string{
 				"app.kubernetes.io/name":       "verify-and-create-vsa",
 				"app.kubernetes.io/instance":   snapshot.Name,
